@@ -2,21 +2,20 @@ import streamlit as st
 import pandas as pd
 import random
 
-# Carica file Excel
+# Carica il file Excel
 df = pd.read_excel("quiz.xlsx")
-df.columns = df.columns.str.strip()  # pulizia spazi colonne
+df.columns = df.columns.str.strip()  # rimuove eventuali spazi nelle intestazioni
 
+# Titolo app
 st.title("🧠 Simulatore di Quiz")
 
-# Inizializzazione stato
-if "domande" not in st.session_state or "ordini_risposte" not in st.session_state:
-    st.session_state.domande = df.sample(frac=1).reset_index(drop=True)  # mescola domande
+# Inizializzazione dello stato
+if "indice" not in st.session_state:
     st.session_state.indice = 0
     st.session_state.punteggio = 0
     st.session_state.mostra_risposta = False
+    st.session_state.domande = df.sample(frac=1).reset_index(drop=True)  # mischia domande
     st.session_state.ordini_risposte = []
-
-    # Mescola risposte per ogni domanda e salva ordine in session_state
     for i in range(len(st.session_state.domande)):
         risposte = [
             ("A", st.session_state.domande.iloc[i]["Risposta A"]),
@@ -26,62 +25,52 @@ if "domande" not in st.session_state or "ordini_risposte" not in st.session_stat
         random.shuffle(risposte)
         st.session_state.ordini_risposte.append(risposte)
 
-# Se non finito con le domande
+# Controlla se ci sono ancora domande
 if st.session_state.indice < len(st.session_state.domande):
     domanda = st.session_state.domande.iloc[st.session_state.indice]
     st.subheader(f"Domanda {st.session_state.indice + 1}:")
     st.write(domanda["Domanda"])
 
-    # Recupera ordine mischiato risposte per la domanda corrente
+    # Opzioni mescolate
     risposte_mischiate = st.session_state.ordini_risposte[st.session_state.indice]
-    lettere_opzioni = ["A", "B", "C"]
+    opzioni = {lettera: testo for lettera, testo in risposte_mischiate}
 
-    # Dizionario opzioni per mostrare con radio
-    opzioni = {lettere_opzioni[i]: risposte_mischiate[i][1] for i in range(3)}
+    # Trova risposta corretta mescolata
+    corretta_lettera = domanda["Corretta"].strip()
+    corretta_testo = domanda[f"Risposta {corretta_lettera}"].strip()
+    lettera_corretta_mischiata = next(
+        (lettera for lettera, testo in risposte_mischiate if testo == corretta_testo), None
+    )
 
-    # Testo risposta corretta originale
-    risposta_corretta_originale = domanda["Corretta"].strip()
-    testo_risposta_corretta = domanda[f"Risposta {risposta_corretta_originale}"].strip()
-
-    # Trova lettera corretta nell'ordine mescolato
-    risposta_corretta_mischiata = None
-    for k, v in opzioni.items():
-        if v == testo_risposta_corretta:
-            risposta_corretta_mischiata = k
-            break
-
-    # Widget radio con key unica per domanda
     risposta_utente = st.radio(
         "Scegli una risposta:",
-        lettere_opzioni,
+        list(opzioni.keys()),
         format_func=lambda x: f"{x}) {opzioni[x]}",
         key=f"risposta_{st.session_state.indice}"
     )
 
-    if st.button("Conferma"):
-        st.session_state.mostra_risposta = True
-
-        if risposta_utente == risposta_corretta_mischiata:
-            st.session_state.punteggio += 1
+    if not st.session_state.mostra_risposta:
+        if st.button("Conferma"):
+            st.session_state.mostra_risposta = True
+            if risposta_utente == lettera_corretta_mischiata:
+                st.session_state.punteggio += 1
 
     if st.session_state.mostra_risposta:
-        if risposta_utente == risposta_corretta_mischiata:
+        if risposta_utente == lettera_corretta_mischiata:
             st.success("✅ Corretto!")
         else:
-            st.error(f"❌ Sbagliato. La risposta corretta era: {risposta_corretta_mischiata}) {opzioni[risposta_corretta_mischiata]}")
+            st.error(f"❌ Sbagliato. La risposta corretta era: {lettera_corretta_mischiata}) {opzioni[lettera_corretta_mischiata]}")
 
         if st.button("Prossima domanda"):
             st.session_state.indice += 1
             st.session_state.mostra_risposta = False
-            st.experimental_rerun()
+            st.rerun()
 
-# Fine quiz
 else:
+    # Fine del quiz
     st.success("🎉 Hai completato il quiz!")
     st.write(f"**Punteggio finale: {st.session_state.punteggio} su {len(st.session_state.domande)}**")
 
     if st.button("Ricomincia"):
-        st.session_state.indice = 0
-        st.session_state.punteggio = 0
-        st.session_state.mostra_risposta = False
-        st.experimental_rerun()
+        st.session_state.clear()
+        st.rerun()
