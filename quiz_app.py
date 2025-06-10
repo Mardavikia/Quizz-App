@@ -83,23 +83,20 @@ def esercizi():
 
         if st.button("Conferma risposta"):
             corretta = str(domanda["Corretta"]).strip().upper()
-            chiave = f"Risposta {corretta}"
+chiave = f"Risposta {corretta}"
 
-        if chiave not in domanda:
-            st.error(f"Errore: la chiave '{chiave}' non esiste nella domanda.")
-            st.stop()
+if chiave not in domanda:
+    st.error(f"Errore: la chiave '{chiave}' non esiste nella domanda.")
+    st.stop()
 
-    risposta_corretta = domanda[chiave].strip()
-
-            st.session_state.risposte_date[indice] = (scelta == risposta_corretta)
+risposta_corretta = domanda[chiave].strip()
             if scelta == risposta_corretta:
                 st.success("✅ Risposta corretta!")
             else:
                 st.error(f"❌ Risposta sbagliata. La risposta corretta è: {risposta_corretta}")
 
             st.session_state.indice += 1
-            st.rerun()
-
+            st.experimental_rerun()
 
     else:
         corrette = sum(v for v in st.session_state.risposte_date.values())
