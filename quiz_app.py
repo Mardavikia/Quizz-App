@@ -2,42 +2,49 @@ import streamlit as st
 import pandas as pd
 import random
 
-# Carica il file Excel
+# Caricamento file Excel
 df = pd.read_excel("quiz.xlsx")
-df.columns = df.columns.str.strip()  # rimuove eventuali spazi nelle intestazioni
+df.columns = df.columns.str.strip()  # Rimuove spazi nelle intestazioni
 
 # Titolo app
 st.title("🧠 Simulatore di Quiz")
 
-# Inizializzazione dello stato
+# Inizializzazione stato
 if "indice" not in st.session_state:
     st.session_state.indice = 0
     st.session_state.punteggio = 0
     st.session_state.mostra_risposta = False
-    st.session_state.domande = df.sample(frac=1).reset_index(drop=True)  # mischia domande
+    st.session_state.domande = df.sample(frac=1).reset_index(drop=True)
     st.session_state.ordini_risposte = []
     for i in range(len(st.session_state.domande)):
         risposte = [
-            ("A", st.session_state.domande.iloc[i]["Risposta A"]),
-            ("B", st.session_state.domande.iloc[i]["Risposta B"]),
-            ("C", st.session_state.domande.iloc[i]["Risposta C"]),
+            ("A", str(st.session_state.domande.iloc[i]["Risposta A"]).strip()),
+            ("B", str(st.session_state.domande.iloc[i]["Risposta B"]).strip()),
+            ("C", str(st.session_state.domande.iloc[i]["Risposta C"]).strip()),
         ]
         random.shuffle(risposte)
         st.session_state.ordini_risposte.append(risposte)
 
-# Controlla se ci sono ancora domande
+# Se ci sono domande
 if st.session_state.indice < len(st.session_state.domande):
     domanda = st.session_state.domande.iloc[st.session_state.indice]
     st.subheader(f"Domanda {st.session_state.indice + 1}:")
     st.write(domanda["Domanda"])
 
-    # Opzioni mescolate
+    # Opzioni miste
     risposte_mischiate = st.session_state.ordini_risposte[st.session_state.indice]
     opzioni = {lettera: testo for lettera, testo in risposte_mischiate}
 
-    # Trova risposta corretta mescolata
-    corretta_lettera = domanda["Corretta"].strip()
-    corretta_testo = domanda[f"Risposta {corretta_lettera}"].strip()
+    # Gestione risposta corretta
+    corretta_lettera = str(domanda["Corretta"]).strip().upper()
+    colonna_corretta = f"Risposta {corretta_lettera}"
+
+    if colonna_corretta in domanda:
+        corretta_testo = str(domanda[colonna_corretta]).strip()
+    else:
+        st.error(f"❌ Colonna mancante nel file: {colonna_corretta}")
+        st.stop()
+
     lettera_corretta_mischiata = next(
         (lettera for lettera, testo in risposte_mischiate if testo == corretta_testo), None
     )
@@ -67,7 +74,6 @@ if st.session_state.indice < len(st.session_state.domande):
             st.rerun()
 
 else:
-    # Fine del quiz
     st.success("🎉 Hai completato il quiz!")
     st.write(f"**Punteggio finale: {st.session_state.punteggio} su {len(st.session_state.domande)}**")
 
