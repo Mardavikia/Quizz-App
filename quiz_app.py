@@ -40,7 +40,7 @@ def login():
 
         if st.session_state.get("login_rerun", False):
             st.session_state.login_rerun = False
-            st.experimental_rerun()
+            st.rerun()
 
     else:
         st.sidebar.write(f"Benvenuto, {st.session_state.username}!")
@@ -58,7 +58,7 @@ def login():
             for key in ["quiz", "indice", "risposte_date", "esame_domande", "esame_indice", "esame_punteggio"]:
                 if key in st.session_state:
                     del st.session_state[key]
-            st.experimental_rerun()
+            st.rerun()
 
 # Modalità esercizi (quiz semplice)
 def esercizi():
@@ -92,7 +92,7 @@ def esercizi():
                 st.error(f"❌ Risposta sbagliata. La risposta corretta è: {risposta_corretta}")
 
             st.session_state.indice += 1
-            st.experimental_rerun()
+            st.rerun()
 
     else:
         corrette = sum(v for v in st.session_state.risposte_date.values())
@@ -149,7 +149,7 @@ def simulazione_esame():
                 st.info("⚠️ Risposta omessa.")
 
             st.session_state.esame_indice += 1
-            st.experimental_rerun()
+            st.rerun()
     else:
         punteggio = st.session_state.esame_punteggio
         st.write("**Esame completato!**")
