@@ -1,55 +1,49 @@
 import streamlit as st
 import pandas as pd
+import random
 
 # Carica file Excel
 df = pd.read_excel("quiz.xlsx")
+df.columns = df.columns.str.strip()  # pulisce eventuali spazi bianchi
 
-# Inizializza stato sessione
-if "indice" not in st.session_state:
+st.title("🧠 Simulatore di Quiz")
+
+# Mescola domande una volta (usa random_state per riproducibilità se vuoi)
+if "domande" not in st.session_state:
+    st.session_state.domande = df.sample(frac=1).reset_index(drop=True)
     st.session_state.indice = 0
     st.session_state.punteggio = 0
     st.session_state.mostra_risposta = False
 
-st.title("🧠 Simulatore di Quiz")
-
-# Mescola domande solo all'inizio
-df = df.sample(frac=1, random_state=42).reset_index(drop=True)
-
-if st.session_state.indice < len(df):
-    domanda = df.iloc[st.session_state.indice]
+if st.session_state.indice < len(st.session_state.domande):
+    domanda = st.session_state.domande.iloc[st.session_state.indice]
     st.subheader(f"Domanda {st.session_state.indice + 1}:")
     st.write(domanda["Domanda"])
 
-    opzioni = {
-        "A": domanda["Risposta A"],
-        "B": domanda["Risposta B"],
-        "C": domanda["Risposta C"]
-    }
+    # Prepara le risposte in lista (tupla: codice, testo)
+    risposte_originali = [
+        ("A", domanda["Risposta A"]),
+        ("B", domanda["Risposta B"]),
+        ("C", domanda["Risposta C"])
+    ]
 
-    risposta_utente = st.radio("Scegli una risposta:", list(opzioni.keys()), format_func=lambda x: f"{x}) {opzioni[x]}", key=f"risposta_{st.session_state.indice}")
+    # Mischia le risposte
+    random.shuffle(risposte_originali)
 
-    if st.button("Conferma"):
-        st.session_state.mostra_risposta = True
-        if risposta_utente == domanda["Corretta"]:
-            st.session_state.punteggio += 1
+    # Crea un dizionario per mappare la risposta scelta al codice originale
+    # es. {'A': 'Risposta B', ...} -> dobbiamo tenere traccia di quale risposta è corretta
+    risposta_corretta_originale = domanda["Corretta"]
 
-    if st.session_state.mostra_risposta:
-        risposta_corretta = domanda["Corretta"]
-        if risposta_utente == risposta_corretta:
-            st.success("✅ Corretto!")
-        else:
-            st.error(f"❌ Sbagliato. La risposta corretta era: {risposta_corretta}) {opzioni[risposta_corretta]}")
+    # Trova la lettera (A/B/C) della risposta corretta nell'ordine originale
+    testo_risposta_corretta = domanda[f"Risposta {risposta_corretta_originale}"]
 
-        if st.button("Prossima domanda"):
-            st.session_state.indice += 1
-            st.session_state.mostra_risposta = False
-            st.experimental_rerun()
-else:
-    st.success("🎉 Hai completato il quiz!")
-    st.write(f"**Punteggio finale: {st.session_state.punteggio} su {len(df)}**")
+    # Ora associare a ciascuna opzione (posizione) il codice "fittizio" A, B, C per l'utente
+    lettere_opzioni = ["A", "B", "C"]
+    opzioni_mischiate = {lettere_opzioni[i]: risposte_originali[i][1] for i in range(3)}
 
-    if st.button("Ricomincia"):
-        st.session_state.indice = 0
-        st.session_state.punteggio = 0
-        st.session_state.mostra_risposta = False
-        st.experimental_rerun()
+    # Trova quale lettera (A/B/C) corrisponde alla risposta corretta nelle risposte miste
+    risposta_corretta_mischiata = None
+    for k, v in opzioni_mischiate.items():
+        if v == testo_risposta_corretta:
+            risposta_corretta_mischiata = k
+            break
