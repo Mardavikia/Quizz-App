@@ -9,14 +9,13 @@ df.columns = df.columns.str.strip()  # pulisce eventuali spazi bianchi
 st.title("🧠 Simulatore di Quiz")
 
 # Inizializza domande mischiando ordine delle domande e delle risposte (una volta sola)
-if "domande" not in st.session_state:
+if "domande" not in st.session_state or "ordini_risposte" not in st.session_state:
     st.session_state.domande = df.sample(frac=1).reset_index(drop=True)
     st.session_state.indice = 0
     st.session_state.punteggio = 0
     st.session_state.mostra_risposta = False
-    st.session_state.ordini_risposte = []  # salveremo qui l'ordine random di risposte per ogni domanda
+    st.session_state.ordini_risposte = []
 
-    # Prepara ordine delle risposte per ogni domanda
     for i in range(len(st.session_state.domande)):
         risposte = [
             ("A", st.session_state.domande.iloc[i]["Risposta A"]),
@@ -25,6 +24,9 @@ if "domande" not in st.session_state:
         ]
         random.shuffle(risposte)
         st.session_state.ordini_risposte.append(risposte)
+
+if "ordini_risposte" not in st.session_state:
+    st.session_state.ordini_risposte = []
 
 if st.session_state.indice < len(st.session_state.domande):
     domanda = st.session_state.domande.iloc[st.session_state.indice]
