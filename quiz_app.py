@@ -92,7 +92,7 @@ def login():
             else: # Simulazione Esame
                 # Resetta gli stati degli esercizi
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
-                            "risposta_confermata", "domande_errate_ids", "domande_conosciute_ids"]:
+                            "risposta_confermata", "domande_errate_ids", "domande_conosciute_ids", "ultimo_indice_esercizi"]:
                     st.session_state.pop(key, None)
                 for key in list(st.session_state.keys()):
                     if key.startswith("scelta_q"):
@@ -165,6 +165,7 @@ def esercizi():
     
     domande_conosciute_utente = set(utenti[username]['domande_conosciute_ids'])
     
+    # Se non è stato ancora inizializzato il quiz per la sessione o è vuoto
     if "quiz" not in st.session_state or not st.session_state.quiz:
         full_quiz = carica_quiz()
         quiz_filtrato = [q for q in full_quiz if q.get('ID') not in domande_conosciute_utente]
@@ -180,7 +181,10 @@ def esercizi():
             
             if st.button("Ricomincia Esercizi (includi tutte le domande)", key="ricomincia_all_domande_main"):
                 utenti[username]['domande_conosciute_ids'] = []
+                # Reset dell'indice salvato per l'utente
+                utenti[username]['ultimo_indice_esercizi'] = 0
                 salva_utenti(utenti)
+                # Reset degli stati della sessione
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
                              "risposta_confermata", "domande_errate_ids"]:
                     st.session_state.pop(key, None)
@@ -192,7 +196,12 @@ def esercizi():
         
         random.shuffle(quiz_filtrato)
         st.session_state.quiz = quiz_filtrato
-        st.session_state.indice = 0
+        
+        # Recupera l'ultimo indice salvato per l'utente, altrimenti parti da 0
+        ultimo_indice_salvato = utenti[username].get('ultimo_indice_esercizi', 0)
+        # Assicurati che l'indice non superi la lunghezza del quiz filtrato
+        st.session_state.indice = min(ultimo_indice_salvato, len(quiz_filtrato) - 1) if quiz_filtrato else 0
+        
         st.session_state.risposte_date = {}
         st.session_state.ordine_risposte = {}
         st.session_state.risposta_confermata = False
@@ -263,6 +272,10 @@ def esercizi():
 
                 if st.button("Prossima domanda", key=f"prossima_btn_{i}"):
                     st.session_state.indice += 1
+                    # Salva l'indice attuale nel profilo utente
+                    utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
+                    salva_utenti(utenti)
+                    
                     st.session_state.risposta_confermata = False
                     st.session_state.pop(f"scelta_q{i}", None)
                     st.rerun()
@@ -271,6 +284,8 @@ def esercizi():
             if q.get('ID') and q['ID'] not in domande_conosciute_utente:
                 if st.button("La Conosco", key=f"conosco_btn_{q['ID']}"):
                     utenti[username]['domande_conosciute_ids'].append(q['ID'])
+                    # Salva l'indice attuale nel profilo utente (anche qui, per coerenza)
+                    utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice + 1 # Avanti di una domanda
                     salva_utenti(utenti)
                     st.success(f"Domanda '{q.get('Domanda', 'N/D')}' segnata come conosciuta!")
                     st.session_state.indice += 1
@@ -301,13 +316,19 @@ def esercizi():
         current_errate_ids = set(utenti[username].get('domande_errate_ids', []))
         current_errate_ids.update(st.session_state.domande_errate_ids)
         utenti[username]['domande_errate_ids'] = list(current_errate_ids)
-
+        
+        # Reset dell'indice salvato quando gli esercizi sono completati
+        utenti[username]['ultimo_indice_esercizi'] = 0 
         salva_utenti(utenti)
         st.info(f"Le tue domande errate sono state salvate nel tuo profilo.")
 
         col_ricomincia_1, col_ricomincia_2 = st.columns(2)
         with col_ricomincia_1:
             if st.button("Ricomincia Esercizi (escludi le conosciute)", key="ricomincia_escludi"):
+                # Reset dell'indice salvato per l'utente
+                utenti[username]['ultimo_indice_esercizi'] = 0
+                salva_utenti(utenti)
+                # Reset degli stati della sessione
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
                              "risposta_confermata", "domande_errate_ids"]:
                     st.session_state.pop(key, None)
@@ -319,7 +340,10 @@ def esercizi():
         with col_ricomincia_2:
             if st.button("Ricomincia Esercizi (includi tutte le domande)", key="ricomincia_includi_all"):
                 utenti[username]['domande_conosciute_ids'] = []
+                # Reset dell'indice salvato per l'utente
+                utenti[username]['ultimo_indice_esercizi'] = 0
                 salva_utenti(utenti)
+                # Reset degli stati della sessione
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
                              "risposta_confermata", "domande_errate_ids"]:
                     st.session_state.pop(key, None)
@@ -475,14 +499,11 @@ def simulazione_esame():
             utenti[username]['storico_simulazioni'].append(simulazione_record)
             
             # --- LOGICA PER MANTENERE SOLO LE ULTIME 5 SIMULAZIONI ---
-            # Assicurati che lo storico sia ordinato dalla più vecchia alla più nuova prima di tagliare
-            # (sebbene l'append lo aggiunga sempre alla fine, un riordino assicura robustezza)
             utenti[username]['storico_simulazioni'] = sorted(
                 utenti[username]['storico_simulazioni'], 
                 key=lambda x: x.get('data', ''), 
                 reverse=False # Ordina in modo crescente (dal più vecchio al più nuovo)
             )
-            # Rimuovi le simulazioni più vecchie se il conteggio supera 5
             if len(utenti[username]['storico_simulazioni']) > 5:
                 utenti[username]['storico_simulazioni'] = utenti[username]['storico_simulazioni'][-5:]
             # --- FINE LOGICA PER MANTENERE SOLO LE ULTIME 5 SIMULAZIONI ---
