@@ -2,7 +2,7 @@ import streamlit as st
 import json
 import random
 import pandas as pd
-import datetime # Importa il modulo datetime
+import datetime
 
 UTENTI_FILE = "utenti.json"
 QUIZ_FILE = "quiz.xlsx"
@@ -22,6 +22,7 @@ def salva_utenti(utenti):
     with open(UTENTI_FILE, "w") as f:
         json.dump(utenti, f, indent=4)
 
+@st.cache_data # <--- AGGIUNTO IL DECORATORE QUI
 def carica_quiz():
     try:
         df = pd.read_excel(QUIZ_FILE)
@@ -29,6 +30,8 @@ def carica_quiz():
         if 'ID' not in df.columns:
             st.error(f"Errore: Il file '{QUIZ_FILE}' deve contenere una colonna 'ID' per identificare univocamente le domande.")
             st.stop()
+        # Converti esplicitamente l'ID in stringa per consistenza con il JSON
+        df['ID'] = df['ID'].astype(str) # <--- AGGIUNTO QUESTO
         return df.to_dict(orient="records")
     except FileNotFoundError:
         st.error(f"Errore: Il file del quiz '{QUIZ_FILE}' non è stato trovato. Assicurati che sia nella stessa directory dell'app.")
@@ -66,7 +69,7 @@ def login():
             st.session_state.modalita = new_modalita
             if new_modalita == "Esercizi":
                 for key in ["esame_domande", "esame_indice", "esame_punteggio",
-                            "esame_ordine_risposte", "esame_risposte_date",
+                            "esame_ordine_risposte", "esame_risposte_dettaglio",
                             "esame_domande_errate_ids", "esame_confermato"]:
                     st.session_state.pop(key, None)
                 for key in list(st.session_state.keys()):
@@ -100,9 +103,11 @@ def visualizza_storico_simulazioni():
     if not storico:
         st.sidebar.info("Nessuna simulazione d'esame effettuata.")
     else:
-        # Ordina lo storico dalla simulazione più recente
-        # Assumiamo che 'data' sia una stringa ISO, quindi possiamo ordinarla direttamente
         storico_ordinato = sorted(storico, key=lambda x: x.get('data', ''), reverse=True)
+        # Carica il quiz completo una volta sola per recuperare i testi delle domande
+        # Questo verrà servito dalla cache grazie a @st.cache_data
+        quiz_completo = carica_quiz()
+        domande_map = {q['ID']: q for q in quiz_completo} # Mappa ID a domanda
 
         for i, sim in enumerate(storico_ordinato):
             data = sim.get('data', 'N/D')
@@ -121,14 +126,9 @@ def visualizza_storico_simulazioni():
                     st.write("---")
                     st.write("**Dettaglio Risposte:**")
                     
-                    # Carica il quiz completo una volta per recuperare i testi delle domande
-                    quiz_completo = carica_quiz() 
-                    # Crea un dizionario ID -> Domanda per un accesso rapido
-                    domande_map = {q['ID']: q for q in quiz_completo}
-
                     for k, risposta_dettaglio in enumerate(dettaglio_risposte):
-                        # Trova il testo della domanda originale usando l'ID
                         domanda_id = risposta_dettaglio.get('id_domanda')
+                        # Recupera il testo della domanda dalla mappa
                         testo_domanda = domande_map.get(domanda_id, {}).get('Domanda', f"Domanda ID {domanda_id} (non trovata)")
 
                         st.markdown(f"**Domanda {k+1}:** {testo_domanda}")
@@ -136,7 +136,7 @@ def visualizza_storico_simulazioni():
                         st.write(f" - **Corretta:** {risposta_dettaglio.get('corretta', 'N/D')}")
                         st.write(f" - **Stato:** {risposta_dettaglio.get('stato_risposta', 'N/D')}")
                         st.write(f" - **Punti assegnati:** {risposta_dettaglio.get('punteggio_assegnato', 0.0):.2f}")
-                        st.markdown("---") # Linea separatrice tra i dettagli delle risposte
+                        st.markdown("---")
 
 # --- Modalità Esercizi ---
 def esercizi():
@@ -163,7 +163,6 @@ def esercizi():
                 str(q.get("Risposta A", "")),
                 str(q.get("Risposta B", "")),
                 str(q.get("Risposta C", "")),
-                # Aggiungi altre opzioni se presenti
             ]
             opzioni_valide = [o for o in opzioni_originali if o.strip() != ""]
             random.shuffle(opzioni_valide)
@@ -261,7 +260,7 @@ def simulazione_esame():
         st.session_state.esame_indice = 0
         st.session_state.esame_punteggio = 0.0
         st.session_state.esame_ordine_risposte = {}
-        st.session_state.esame_risposte_dettaglio = [] # Nuovo: Dettaglio di ogni risposta data (per storico)
+        st.session_state.esame_risposte_dettaglio = []
         st.session_state.esame_domande_errate_ids = []
         st.session_state.esame_confermato = False
         
@@ -293,6 +292,7 @@ def simulazione_esame():
 
         scelta = st.radio("Risposta (lascia vuoto per omettere):", opzioni_radio_esame, key=f"es{j}", index=index_selezionato_esame,
                           disabled=st.session_state.esame_confermato)
+        
         st.session_state[f"es_scelta_q{j}"] = scelta
 
 
@@ -329,9 +329,8 @@ def simulazione_esame():
 
                 st.session_state.esame_punteggio += pun
                 
-                # Aggiungi i dettagli della risposta alla lista per lo storico
                 st.session_state.esame_risposte_dettaglio.append({
-                    "id_domanda": q.get('ID'), # Salva l'ID della domanda
+                    "id_domanda": q.get('ID'),
                     "scelta_data": scelta,
                     "corretta": corretta_text,
                     "stato_risposta": stato_risposta,
@@ -342,13 +341,6 @@ def simulazione_esame():
                 st.rerun()
 
         else:
-            # Recupera i dettagli della risposta per ri-visualizzare il feedback
-            # Questo è l'ultimo dettaglio della risposta aggiunto per la domanda corrente 'j'
-            # ATTENZIONE: Questo potrebbe dare problemi se la lista non è perfettamente allineata con 'j'
-            # Meglio recuperarlo dal dizionario 'esame_risposte_dettaglio' per l'ID della domanda,
-            # ma per semplicità assumiamo sia l'ultimo elemento.
-            
-            # Una soluzione più robusta sarebbe:
             risposta_dettaglio_corrente = next((item for item in st.session_state.esame_risposte_dettaglio if item.get('id_domanda') == q.get('ID')), None)
 
             if risposta_dettaglio_corrente:
@@ -356,9 +348,9 @@ def simulazione_esame():
                     st.info("⚠️ Domanda omessa.")
                 elif risposta_dettaglio_corrente['stato_risposta'] == "corretta":
                     st.success("✅ Risposta corretta!")
-                else: # stato_risposta == "sbagliata"
+                else:
                     st.error(f"❌ Errata. Risposta corretta: **{risposta_dettaglio_corrente['corretta']}**")
-            else: # Fallback se per qualche motivo il dettaglio non si trova
+            else:
                 st.warning("Feedback non disponibile.")
 
             if st.button("Prossima domanda", key=f"btn_prossima_esame_{j}"):
@@ -367,7 +359,7 @@ def simulazione_esame():
                 st.session_state.pop(f"es_scelta_q{j}", None)
                 st.rerun()
 
-    else: # Fine della simulazione d'esame
+    else:
         st.write("---")
         st.write(f"🎉 Simulazione Esame Completata!")
         
@@ -383,7 +375,6 @@ def simulazione_esame():
         else:
             st.write("Nessuna domanda nel quiz per calcolare la percentuale.")
 
-        # Salvataggio nel profilo utente (incluso lo storico)
         utenti = carica_utenti()
         username = st.session_state.username
 
@@ -392,17 +383,15 @@ def simulazione_esame():
         if 'storico_simulazioni' not in utenti[username]:
             utenti[username]['storico_simulazioni'] = []
 
-        # Aggiungi i dettagli della simulazione allo storico
         simulazione_record = {
             'data': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             'punteggio_finale': punteggio_finale,
             'domande_totali': tot_domande_esame,
             'punteggio_max_possibile': punteggio_max_possibile,
-            'dettaglio_risposte': st.session_state.esame_risposte_dettaglio # Salva il riepilogo
+            'dettaglio_risposte': st.session_state.esame_risposte_dettaglio
         }
         utenti[username]['storico_simulazioni'].append(simulazione_record)
 
-        # Aggiorna anche la lista delle domande errate (opzionale, dato che il dettaglio include tutto)
         current_errate_ids_esame = set(utenti[username].get('domande_errate_esame_ids', []))
         current_errate_ids_esame.update(st.session_state.esame_domande_errate_ids)
         utenti[username]['domande_errate_esame_ids'] = list(current_errate_ids_esame)
