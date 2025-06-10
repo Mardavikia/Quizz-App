@@ -7,7 +7,7 @@ import datetime
 UTENTI_FILE = "utenti.json"
 QUIZ_FILE = "quiz.xlsx"
 
-# --- INIZIALIZZAZIONE GLOBALE E ULTRA-PRECOCE DI session_state ---
+# --- INIZIALIZZAZIONE GLOBALE E ULTRA-PRECOSE DI session_state ---
 # Questo blocco viene eseguito ad ogni re-run e assicura che queste chiavi esistano sempre.
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -85,8 +85,7 @@ def login():
                 corrette_sessione = sum(1 for status in st.session_state.risposte_date.values() if status is True)
                 sbagliate_sessione = sum(1 for status in st.session_state.risposte_date.values() if status is False)
                 st.sidebar.success(f"Risposte corrette: **{corrette_sessione}**")
-                # Ora in rosso
-                st.sidebar.markdown(f"Risposte sbagliate: <span style='color:red;'>**{sbagliate_sessione}**</span>", unsafe_allow_html=True)
+                st.sidebar.error(f"Risposte sbagliate: **{sbagliate_sessione}**") # Ora in rosso con lo stesso stile
             
         st.sidebar.markdown("---") # Linea di separazione
 
