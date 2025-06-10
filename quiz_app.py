@@ -69,15 +69,6 @@ def login():
     else:
         st.sidebar.write(f"Benvenuto, {st.session_state.username}!")
         
-        # --- DEBUGGING: VISUALIZZA LO STATO DI SESSIONE ---
-        st.sidebar.markdown("---")
-        st.sidebar.subheader("DEBUGGING INFO")
-        st.sidebar.write(f"Modalità attuale: **{st.session_state.modalita}**")
-        st.sidebar.write(f"Contenuto di risposte_date: **{st.session_state.risposte_date}**")
-        st.sidebar.write(f"Numero di risposte registrate: **{len(st.session_state.risposte_date)}**")
-        st.sidebar.markdown("---")
-        # --- FINE DEBUGGING ---
-
         # --- COUNTER NEL SIDEBAR ---
         utenti = carica_utenti()
         username = st.session_state.username
@@ -90,16 +81,15 @@ def login():
             st.sidebar.warning(f"Domande non conosciute: **{domande_non_conosciute_count}**")
             
             # Contatori Risposte Corrette e Sbagliate per la sessione corrente di esercizi
-            # Vengono visualizzati solo se la modalità è "Esercizi"
             if st.session_state.modalita == "Esercizi":
                 corrette_sessione = sum(1 for status in st.session_state.risposte_date.values() if status is True)
                 sbagliate_sessione = sum(1 for status in st.session_state.risposte_date.values() if status is False)
-                st.sidebar.markdown(f"**Risposte corrette:** <span style='color:green;'>{corrette_sessione}</span>", unsafe_allow_html=True)
-                st.sidebar.markdown(f"**Risposte sbagliate:** <span style='color:red;'>{sbagliate_sessione}</span>", unsafe_allow_html=True)
+                st.sidebar.success(f"Risposte corrette: **{corrette_sessione}**")
+                st.sidebar.warning(f"Risposte sbagliate: **{sbagliate_sessione}**")
             
         st.sidebar.markdown("---") # Linea di separazione
 
-        current_modalita = st.session_state.modalita # Usa direttamente lo stato già inizializzato
+        current_modalita = st.session_state.modalita
         new_modalita = st.sidebar.radio("Scegli la modalità", ("Esercizi", "Simulazione Esame"), 
                                         index=0 if current_modalita == "Esercizi" else 1, key="modalita_radio")
 
@@ -112,7 +102,6 @@ def login():
                             "esame_ordine_risposte", "esame_risposte_dettaglio",
                             "esame_domande_errate_ids", "esame_confermato", "simulazione_gia_salvata"]:
                     st.session_state.pop(key, None)
-                # Resetta risposte_date solo se non è già vuoto e si passa agli esercizi
                 st.session_state.risposte_date = {} 
                 for key in list(st.session_state.keys()):
                     if key.startswith("es_scelta_q"):
@@ -123,7 +112,6 @@ def login():
                             "risposta_confermata", "domande_errate_ids", "domande_conosciute_ids",
                             "ultimo_indice_esercizi", "sequenza_esercizi_corrente"]: 
                     st.session_state.pop(key, None)
-                # Resetta risposte_date solo se non è già vuoto e si passa alla simulazione
                 st.session_state.risposte_date = {} 
                 for key in list(st.session_state.keys()):
                     if key.startswith("scelta_q"):
@@ -143,7 +131,6 @@ def login():
                 for key in ["quiz", "indice", "ordine_risposte",
                              "risposta_confermata", "domande_errate_ids"]:
                     st.session_state.pop(key, None)
-                # Forza il reset di risposte_date anche qui
                 st.session_state.risposte_date = {} 
                 for key in list(st.session_state.keys()):
                     if key.startswith("scelta_q"):
@@ -229,7 +216,7 @@ def esercizi():
             st.warning("Hai segnato tutte le domande come 'conosciute' o non ci sono domande disponibili. Premi 'Ricomincia Esercizi' per ripartire da tutte le domande.")
             st.session_state.quiz = []
             st.session_state.indice = 0
-            st.session_state.risposte_date = {} # Resetta qui per la nuova sessione se tutte conosciute
+            st.session_state.risposte_date = {} 
             st.session_state.ordine_risposte = {}
             st.session_state.risposta_confermata = False
             st.session_state.domande_errate_ids = []
@@ -242,7 +229,7 @@ def esercizi():
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
                              "risposta_confermata", "domande_errate_ids"]:
                     st.session_state.pop(key, None)
-                st.session_state.risposte_date = {} # Resetta anche qui
+                st.session_state.risposte_date = {} 
                 for key in list(st.session_state.keys()):
                     if key.startswith("scelta_q"):
                         st.session_state.pop(key)
@@ -274,7 +261,6 @@ def esercizi():
         ultimo_indice_salvato = utenti[username].get('ultimo_indice_esercizi', 0)
         st.session_state.indice = min(ultimo_indice_salvato, len(quiz_della_sessione) - 1) if quiz_della_sessione else 0
         
-        # Resetta risposte_date qui quando un nuovo quiz viene caricato/avviato
         st.session_state.risposte_date = {} 
 
         st.session_state.ordine_risposte = {}
@@ -321,7 +307,6 @@ def esercizi():
 
                     corretta_text = str(q[chiave_risposta_corretta]).strip()
 
-                    # AGGIORNAMENTO DEL COUNTER
                     st.session_state.risposte_date[i] = (scelta == corretta_text)
 
                     if scelta == corretta_text:
@@ -405,7 +390,7 @@ def esercizi():
                 for key in ["quiz", "indice", "ordine_risposte",
                              "risposta_confermata", "domande_errate_ids"]:
                     st.session_state.pop(key, None)
-                st.session_state.risposte_date = {} # Resetta anche qui
+                st.session_state.risposte_date = {} 
                 for key in list(st.session_state.keys()):
                     if key.startswith("scelta_q"):
                         st.session_state.pop(key)
@@ -420,7 +405,7 @@ def esercizi():
                 for key in ["quiz", "indice", "ordine_risposte",
                              "risposta_confermata", "domande_errate_ids"]:
                     st.session_state.pop(key, None)
-                st.session_state.risposte_date = {} # Resetta anche qui
+                st.session_state.risposte_date = {} 
                 for key in list(st.session_state.keys()):
                     if key.startswith("scelta_q"):
                         st.session_state.pop(key)
@@ -603,10 +588,8 @@ def simulazione_esame():
 
 # --- Main ---
 def main():
-    # La login gestirà l'inizializzazione specifica del session_state per l'utente loggato
     login() 
     if st.session_state.get("logged_in", False):
-        # La modalità è già inizializzata a livello globale o impostata dal radio button
         if st.session_state.modalita == "Esercizi":
             esercizi()
         else: # "Simulazione Esame"
