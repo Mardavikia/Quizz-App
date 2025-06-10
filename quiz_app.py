@@ -7,7 +7,7 @@ import datetime
 UTENTI_FILE = "utenti.json"
 QUIZ_FILE = "quiz.xlsx"
 
-# --- Funzioni Utility ---
+# --- Funzioni Utility (rimangono invariate) ---
 def carica_utenti():
     try:
         with open(UTENTI_FILE, "r") as f:
@@ -22,7 +22,7 @@ def salva_utenti(utenti):
     with open(UTENTI_FILE, "w") as f:
         json.dump(utenti, f, indent=4)
 
-@st.cache_data # <--- AGGIUNTO IL DECORATORE QUI
+@st.cache_data
 def carica_quiz():
     try:
         df = pd.read_excel(QUIZ_FILE)
@@ -30,8 +30,7 @@ def carica_quiz():
         if 'ID' not in df.columns:
             st.error(f"Errore: Il file '{QUIZ_FILE}' deve contenere una colonna 'ID' per identificare univocamente le domande.")
             st.stop()
-        # Converti esplicitamente l'ID in stringa per consistenza con il JSON
-        df['ID'] = df['ID'].astype(str) # <--- AGGIUNTO QUESTO
+        df['ID'] = df['ID'].astype(str)
         return df.to_dict(orient="records")
     except FileNotFoundError:
         st.error(f"Errore: Il file del quiz '{QUIZ_FILE}' non è stato trovato. Assicurati che sia nella stessa directory dell'app.")
@@ -40,7 +39,7 @@ def carica_quiz():
         st.error(f"Errore durante il caricamento o la lettura del quiz Excel: {e}")
         st.stop()
 
-# --- Login ---
+# --- Login (rimane invariata) ---
 def login():
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
@@ -70,7 +69,7 @@ def login():
             if new_modalita == "Esercizi":
                 for key in ["esame_domande", "esame_indice", "esame_punteggio",
                             "esame_ordine_risposte", "esame_risposte_dettaglio",
-                            "esame_domande_errate_ids", "esame_confermato"]:
+                            "esame_domande_errate_ids", "esame_confermato", "simulazione_gia_salvata"]: # AGGIUNTO 'simulazione_gia_salvata' QUI
                     st.session_state.pop(key, None)
                 for key in list(st.session_state.keys()):
                     if key.startswith("es_scelta_q"):
@@ -84,14 +83,13 @@ def login():
                         st.session_state.pop(key)
             st.rerun()
 
-        # Nuova Sezione Storico Simulazioni
         visualizza_storico_simulazioni()
 
         if st.sidebar.button("Logout"):
             st.session_state.clear()
             st.rerun()
 
-# --- Visualizzazione Storico Simulazioni ---
+# --- Visualizzazione Storico Simulazioni (rimane invariata) ---
 def visualizza_storico_simulazioni():
     st.sidebar.markdown("---")
     st.sidebar.subheader("Storico Simulazioni Esame")
@@ -104,10 +102,8 @@ def visualizza_storico_simulazioni():
         st.sidebar.info("Nessuna simulazione d'esame effettuata.")
     else:
         storico_ordinato = sorted(storico, key=lambda x: x.get('data', ''), reverse=True)
-        # Carica il quiz completo una volta sola per recuperare i testi delle domande
-        # Questo verrà servito dalla cache grazie a @st.cache_data
         quiz_completo = carica_quiz()
-        domande_map = {q['ID']: q for q in quiz_completo} # Mappa ID a domanda
+        domande_map = {q['ID']: q for q in quiz_completo}
 
         for i, sim in enumerate(storico_ordinato):
             data = sim.get('data', 'N/D')
@@ -128,7 +124,6 @@ def visualizza_storico_simulazioni():
                     
                     for k, risposta_dettaglio in enumerate(dettaglio_risposte):
                         domanda_id = risposta_dettaglio.get('id_domanda')
-                        # Recupera il testo della domanda dalla mappa
                         testo_domanda = domande_map.get(domanda_id, {}).get('Domanda', f"Domanda ID {domanda_id} (non trovata)")
 
                         st.markdown(f"**Domanda {k+1}:** {testo_domanda}")
@@ -138,7 +133,7 @@ def visualizza_storico_simulazioni():
                         st.write(f" - **Punti assegnati:** {risposta_dettaglio.get('punteggio_assegnato', 0.0):.2f}")
                         st.markdown("---")
 
-# --- Modalità Esercizi ---
+# --- Modalità Esercizi (rimane invariata) ---
 def esercizi():
     st.header("Modalità Esercizi")
 
@@ -249,7 +244,7 @@ def esercizi():
                     st.session_state.pop(key)
             st.rerun()
 
-# --- Modalità Simulazione Esame ---
+# --- Modalità Simulazione Esame (MODIFICATA) ---
 def simulazione_esame():
     st.header("Simulazione Esame")
 
@@ -263,6 +258,7 @@ def simulazione_esame():
         st.session_state.esame_risposte_dettaglio = []
         st.session_state.esame_domande_errate_ids = []
         st.session_state.esame_confermato = False
+        st.session_state.simulazione_gia_salvata = False # <--- NUOVA VARIABILE DI STATO QUI
         
     domande = st.session_state.esame_domande
     j = st.session_state.esame_indice
@@ -359,7 +355,7 @@ def simulazione_esame():
                 st.session_state.pop(f"es_scelta_q{j}", None)
                 st.rerun()
 
-    else:
+    else: # Fine della simulazione d'esame
         st.write("---")
         st.write(f"🎉 Simulazione Esame Completata!")
         
@@ -375,47 +371,54 @@ def simulazione_esame():
         else:
             st.write("Nessuna domanda nel quiz per calcolare la percentuale.")
 
-        utenti = carica_utenti()
-        username = st.session_state.username
+        # --- LOGICA DI SALVATAGGIO UNICA ---
+        # Salva la simulazione solo se non è già stata salvata
+        if not st.session_state.simulazione_gia_salvata: # <--- CONTROLLO AGGIUNTO
+            utenti = carica_utenti()
+            username = st.session_state.username
 
-        if username not in utenti:
-            utenti[username] = {}
-        if 'storico_simulazioni' not in utenti[username]:
-            utenti[username]['storico_simulazioni'] = []
+            if username not in utenti:
+                utenti[username] = {}
+            if 'storico_simulazioni' not in utenti[username]:
+                utenti[username]['storico_simulazioni'] = []
 
-        simulazione_record = {
-            'data': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            'punteggio_finale': punteggio_finale,
-            'domande_totali': tot_domande_esame,
-            'punteggio_max_possibile': punteggio_max_possibile,
-            'dettaglio_risposte': st.session_state.esame_risposte_dettaglio
-        }
-        utenti[username]['storico_simulazioni'].append(simulazione_record)
+            simulazione_record = {
+                'data': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'punteggio_finale': punteggio_finale,
+                'domande_totali': tot_domande_esame,
+                'punteggio_max_possibile': punteggio_max_possibile,
+                'dettaglio_risposte': st.session_state.esame_risposte_dettaglio
+            }
+            utenti[username]['storico_simulazioni'].append(simulazione_record)
 
-        current_errate_ids_esame = set(utenti[username].get('domande_errate_esame_ids', []))
-        current_errate_ids_esame.update(st.session_state.esame_domande_errate_ids)
-        utenti[username]['domande_errate_esame_ids'] = list(current_errate_ids_esame)
+            current_errate_ids_esame = set(utenti[username].get('domande_errate_esame_ids', []))
+            current_errate_ids_esame.update(st.session_state.esame_domande_errate_ids)
+            utenti[username]['domande_errate_esame_ids'] = list(current_errate_ids_esame)
 
-        salva_utenti(utenti)
-        st.info(f"Il tuo punteggio e lo storico dell'esame sono stati salvati nel tuo profilo.")
+            salva_utenti(utenti)
+            st.session_state.simulazione_gia_salvata = True # <--- IMPOSTA IL FLAG A TRUE
+            st.info(f"Il tuo punteggio e lo storico dell'esame sono stati salvati nel tuo profilo.")
+        else:
+            st.info("Simulazione già salvata nel tuo profilo.") # Messaggio per il secondo render
 
         if st.button("Nuova Simulazione"):
+            # Resetta tutti gli stati per ricominciare una simulazione
             for key in ["esame_domande", "esame_indice", "esame_punteggio", "esame_ordine_risposte",
-                         "esame_risposte_dettaglio", "esame_domande_errate_ids", "esame_confermato"]:
+                         "esame_risposte_dettaglio", "esame_domande_errate_ids", "esame_confermato", "simulazione_gia_salvata"]: # <--- RESETTA ANCHE QUESTO FLAG
                 st.session_state.pop(key, None)
             for key in list(st.session_state.keys()):
                 if key.startswith("es_scelta_q"):
                     st.session_state.pop(key)
             st.rerun()
 
-# --- Main ---
+# --- Main (rimane invariata) ---
 def main():
     login()
     if st.session_state.get("logged_in", False):
         m = st.session_state.get("modalita", "Esercizi")
         if m == "Esercizi":
             esercizi()
-        else: # "Simulazione Esame"
+        else:
             simulazione_esame()
 
 if __name__ == "__main__":
