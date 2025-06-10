@@ -38,14 +38,23 @@ def login():
         st.title("Login")
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
-        if st.button("Login"):
+        login_premuto = st.button("Login")
+
+        if login_premuto:
             utenti = carica_utenti()
             if username in utenti and utenti[username]["password"] == password:
                 st.session_state.logged_in = True
                 st.session_state.username = username
-                st.experimental_rerun()
+                # Usa una variabile di controllo per evitare loop
+                st.session_state.login_rerun = True
             else:
                 st.error("Username o password errati")
+
+        # Solo se il login è appena avvenuto facciamo il rerun una volta
+        if st.session_state.get("login_rerun", False):
+            st.session_state.login_rerun = False
+            st.experimental_rerun()
+
     else:
         st.sidebar.write(f"Benvenuto, {st.session_state.username}!")
         if st.sidebar.button("Logout"):
