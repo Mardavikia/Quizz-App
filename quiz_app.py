@@ -117,7 +117,9 @@ def visualizza_storico_simulazioni():
     if not storico:
         st.sidebar.info("Nessuna simulazione d'esame effettuata.")
     else:
+        # Ordina per data per assicurarsi che le ultime 5 siano effettivamente le più recenti
         storico_ordinato = sorted(storico, key=lambda x: x.get('data', ''), reverse=True)
+        
         quiz_completo = carica_quiz()
         domande_map = {q['ID']: q for q in quiz_completo}
 
@@ -163,7 +165,7 @@ def esercizi():
     
     domande_conosciute_utente = set(utenti[username]['domande_conosciute_ids'])
     
-    if "quiz" not in st.session_state or not st.session_state.quiz: # Modificato controllo a `not st.session_state.quiz` che è più robusto
+    if "quiz" not in st.session_state or not st.session_state.quiz:
         full_quiz = carica_quiz()
         quiz_filtrato = [q for q in full_quiz if q.get('ID') not in domande_conosciute_utente]
         
@@ -176,7 +178,7 @@ def esercizi():
             st.session_state.risposta_confermata = False
             st.session_state.domande_errate_ids = []
             
-            if st.button("Ricomincia Esercizi (includi tutte le domande)", key="ricomincia_all_domande_main"): # Chiave unica
+            if st.button("Ricomincia Esercizi (includi tutte le domande)", key="ricomincia_all_domande_main"):
                 utenti[username]['domande_conosciute_ids'] = []
                 salva_utenti(utenti)
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
@@ -226,7 +228,7 @@ def esercizi():
 
         with col1:
             if not st.session_state.risposta_confermata:
-                if st.button("Conferma risposta", key=f"conferma_btn_{i}"): # Chiave unica
+                if st.button("Conferma risposta", key=f"conferma_btn_{i}"):
                     corretta_lettera = str(q.get("Corretta", "")).strip().upper()
                     chiave_risposta_corretta = f"Risposta {corretta_lettera}"
                     
@@ -249,7 +251,7 @@ def esercizi():
 
                     st.session_state.risposta_confermata = True
                     st.rerun()
-            else: # Risposta già confermata
+            else:
                 corretta_lettera = str(q.get("Corretta", "")).strip().upper()
                 chiave_risposta_corretta = f"Risposta {corretta_lettera}"
                 corretta_text = str(q[chiave_risposta_corretta]).strip()
@@ -259,21 +261,18 @@ def esercizi():
                 else:
                     st.error(f"❌ Sbagliata. La risposta corretta era: **{corretta_text}**")
 
-                if st.button("Prossima domanda", key=f"prossima_btn_{i}"): # Chiave unica
+                if st.button("Prossima domanda", key=f"prossima_btn_{i}"):
                     st.session_state.indice += 1
                     st.session_state.risposta_confermata = False
                     st.session_state.pop(f"scelta_q{i}", None)
                     st.rerun()
         
         with col2:
-            # Pulsante "La Conosco" - visibile solo se la domanda corrente non è già segnata come conosciuta
             if q.get('ID') and q['ID'] not in domande_conosciute_utente:
-                if st.button("La Conosco", key=f"conosco_btn_{q['ID']}"): # Chiave basata sull'ID domanda
-                    # Aggiungi l'ID della domanda corrente alla lista delle domande conosciute dell'utente
+                if st.button("La Conosco", key=f"conosco_btn_{q['ID']}"):
                     utenti[username]['domande_conosciute_ids'].append(q['ID'])
                     salva_utenti(utenti)
                     st.success(f"Domanda '{q.get('Domanda', 'N/D')}' segnata come conosciuta!")
-                    # Avanza alla prossima domanda e ricarica l'app per aggiornare il contatore e filtrare
                     st.session_state.indice += 1
                     st.session_state.risposta_confermata = False
                     st.session_state.pop(f"scelta_q{i}", None)
@@ -308,7 +307,7 @@ def esercizi():
 
         col_ricomincia_1, col_ricomincia_2 = st.columns(2)
         with col_ricomincia_1:
-            if st.button("Ricomincia Esercizi (escludi le conosciute)", key="ricomincia_escludi"): # Chiave unica
+            if st.button("Ricomincia Esercizi (escludi le conosciute)", key="ricomincia_escludi"):
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
                              "risposta_confermata", "domande_errate_ids"]:
                     st.session_state.pop(key, None)
@@ -318,7 +317,7 @@ def esercizi():
                 st.rerun()
         
         with col_ricomincia_2:
-            if st.button("Ricomincia Esercizi (includi tutte le domande)", key="ricomincia_includi_all"): # Chiave unica
+            if st.button("Ricomincia Esercizi (includi tutte le domande)", key="ricomincia_includi_all"):
                 utenti[username]['domande_conosciute_ids'] = []
                 salva_utenti(utenti)
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
@@ -474,6 +473,19 @@ def simulazione_esame():
                 'dettaglio_risposte': st.session_state.esame_risposte_dettaglio
             }
             utenti[username]['storico_simulazioni'].append(simulazione_record)
+            
+            # --- LOGICA PER MANTENERE SOLO LE ULTIME 5 SIMULAZIONI ---
+            # Assicurati che lo storico sia ordinato dalla più vecchia alla più nuova prima di tagliare
+            # (sebbene l'append lo aggiunga sempre alla fine, un riordino assicura robustezza)
+            utenti[username]['storico_simulazioni'] = sorted(
+                utenti[username]['storico_simulazioni'], 
+                key=lambda x: x.get('data', ''), 
+                reverse=False # Ordina in modo crescente (dal più vecchio al più nuovo)
+            )
+            # Rimuovi le simulazioni più vecchie se il conteggio supera 5
+            if len(utenti[username]['storico_simulazioni']) > 5:
+                utenti[username]['storico_simulazioni'] = utenti[username]['storico_simulazioni'][-5:]
+            # --- FINE LOGICA PER MANTENERE SOLO LE ULTIME 5 SIMULAZIONI ---
 
             current_errate_ids_esame = set(utenti[username].get('domande_errate_esame_ids', []))
             current_errate_ids_esame.update(st.session_state.esame_domande_errate_ids)
