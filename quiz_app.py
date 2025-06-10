@@ -323,7 +323,7 @@ def esercizi():
             else:
                 corretta_lettera = str(q.get("Corretta", "")).strip().upper()
                 chiave_risposta_corretta = f"Risposta {corretta_lettera}"
-                corretta_text = str(q[chia_risposta_corretta]).strip()
+                corretta_text = str(q[chiave_risposta_corretta]).strip()
 
                 if st.session_state.risposte_date[i]:
                     st.success("✅ Risposta corretta!")
