@@ -85,7 +85,8 @@ def login():
                 corrette_sessione = sum(1 for status in st.session_state.risposte_date.values() if status is True)
                 sbagliate_sessione = sum(1 for status in st.session_state.risposte_date.values() if status is False)
                 st.sidebar.success(f"Risposte corrette: **{corrette_sessione}**")
-                st.sidebar.warning(f"Risposte sbagliate: **{sbagliate_sessione}**")
+                # Ora in rosso
+                st.sidebar.markdown(f"Risposte sbagliate: <span style='color:red;'>**{sbagliate_sessione}**</span>", unsafe_allow_html=True)
             
         st.sidebar.markdown("---") # Linea di separazione
 
