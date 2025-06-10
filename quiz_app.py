@@ -2,7 +2,7 @@ import streamlit as st
 import json
 import random
 import pandas as pd
-import time # Importa il modulo time per un eventuale delay, se necessario
+import datetime # Importa il modulo datetime
 
 UTENTI_FILE = "utenti.json"
 QUIZ_FILE = "quiz.xlsx"
@@ -13,10 +13,10 @@ def carica_utenti():
         with open(UTENTI_FILE, "r") as f:
             return json.load(f)
     except FileNotFoundError:
-        return {} # Ritorna un dizionario vuoto se il file non esiste
+        return {}
     except json.JSONDecodeError:
         st.error(f"Errore: Il file '{UTENTI_FILE}' non è un JSON valido. Potrebbe essere corrotto o vuoto.")
-        return {} # Ritorna un dizionario vuoto in caso di errore di decodifica JSON
+        return {}
 
 def salva_utenti(utenti):
     with open(UTENTI_FILE, "w") as f:
@@ -26,21 +26,19 @@ def carica_quiz():
     try:
         df = pd.read_excel(QUIZ_FILE)
         df.columns = df.columns.str.strip()
-        # Assicurati che ogni domanda abbia un ID univoco
         if 'ID' not in df.columns:
             st.error(f"Errore: Il file '{QUIZ_FILE}' deve contenere una colonna 'ID' per identificare univocamente le domande.")
-            st.stop() # Ferma l'esecuzione dell'app se manca l'ID
+            st.stop()
         return df.to_dict(orient="records")
     except FileNotFoundError:
         st.error(f"Errore: Il file del quiz '{QUIZ_FILE}' non è stato trovato. Assicurati che sia nella stessa directory dell'app.")
-        st.stop() # Ferma l'esecuzione dell'app se il file non esiste
+        st.stop()
     except Exception as e:
         st.error(f"Errore durante il caricamento o la lettura del quiz Excel: {e}")
-        st.stop() # Ferma l'esecuzione per altri errori di caricamento
+        st.stop()
 
 # --- Login ---
 def login():
-    # Inizializza gli stati di sessione se non esistono
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
     if 'username' not in st.session_state:
@@ -56,49 +54,102 @@ def login():
                 st.session_state.logged_in = True
                 st.session_state.username = username
                 st.success(f"Benvenuto, {username}!")
-                st.rerun() # Rerun per mostrare subito la sidebar e le opzioni
+                st.rerun()
             else:
                 st.error("Username o password errati.")
     else:
         st.sidebar.write(f"Benvenuto, {st.session_state.username}!")
-        # Gestione della modalità: cambia solo se la selezione è diversa
         current_modalita = st.session_state.get("modalita", "Esercizi")
         new_modalita = st.sidebar.radio("Scegli la modalità", ("Esercizi", "Simulazione Esame"), index=0 if current_modalita == "Esercizi" else 1)
 
         if current_modalita != new_modalita:
             st.session_state.modalita = new_modalita
-            # Pulisce gli stati specifici della modalità precedente quando si cambia
             if new_modalita == "Esercizi":
-                # Pulisce stati della simulazione esame
                 for key in ["esame_domande", "esame_indice", "esame_punteggio",
                             "esame_ordine_risposte", "esame_risposte_date",
-                            "esame_domande_errate_ids", "esame_confermato", "esame_feedback_mostrato"]:
+                            "esame_domande_errate_ids", "esame_confermato"]:
                     st.session_state.pop(key, None)
+                for key in list(st.session_state.keys()):
+                    if key.startswith("es_scelta_q"):
+                        st.session_state.pop(key)
             else: # Simulazione Esame
-                # Pulisce stati degli esercizi
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
-                            "risposta_confermata", "feedback_mostrato", "domande_errate_ids"]:
+                            "risposta_confermata", "domande_errate_ids"]:
                     st.session_state.pop(key, None)
-            st.rerun() # Rerun per caricare la nuova modalità
+                for key in list(st.session_state.keys()):
+                    if key.startswith("scelta_q"):
+                        st.session_state.pop(key)
+            st.rerun()
+
+        # Nuova Sezione Storico Simulazioni
+        visualizza_storico_simulazioni()
 
         if st.sidebar.button("Logout"):
-            # Qui potresti salvare eventuali progressi prima del logout se non gestito altrove
-            st.session_state.clear() # Pulisce tutti gli stati di sessione
+            st.session_state.clear()
             st.rerun()
+
+# --- Visualizzazione Storico Simulazioni ---
+def visualizza_storico_simulazioni():
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Storico Simulazioni Esame")
+
+    utenti = carica_utenti()
+    username = st.session_state.username
+    storico = utenti.get(username, {}).get('storico_simulazioni', [])
+
+    if not storico:
+        st.sidebar.info("Nessuna simulazione d'esame effettuata.")
+    else:
+        # Ordina lo storico dalla simulazione più recente
+        # Assumiamo che 'data' sia una stringa ISO, quindi possiamo ordinarla direttamente
+        storico_ordinato = sorted(storico, key=lambda x: x.get('data', ''), reverse=True)
+
+        for i, sim in enumerate(storico_ordinato):
+            data = sim.get('data', 'N/D')
+            punteggio = sim.get('punteggio_finale', 0.0)
+            domande_totali = sim.get('domande_totali', 0)
+            punteggio_max_possibile = sim.get('punteggio_max_possibile', 0.0)
+            
+            with st.sidebar.expander(f"Simulazione del {data} - Punti: {punteggio:.2f}"):
+                st.write(f"**Punteggio Finale:** {punteggio:.2f} / {punteggio_max_possibile:.2f}")
+                if punteggio_max_possibile > 0:
+                    st.write(f"**Percentuale:** {(punteggio / punteggio_max_possibile * 100):.1f}%")
+                st.write(f"**Domande Totali:** {domande_totali}")
+
+                dettaglio_risposte = sim.get('dettaglio_risposte', [])
+                if dettaglio_risposte:
+                    st.write("---")
+                    st.write("**Dettaglio Risposte:**")
+                    
+                    # Carica il quiz completo una volta per recuperare i testi delle domande
+                    quiz_completo = carica_quiz() 
+                    # Crea un dizionario ID -> Domanda per un accesso rapido
+                    domande_map = {q['ID']: q for q in quiz_completo}
+
+                    for k, risposta_dettaglio in enumerate(dettaglio_risposte):
+                        # Trova il testo della domanda originale usando l'ID
+                        domanda_id = risposta_dettaglio.get('id_domanda')
+                        testo_domanda = domande_map.get(domanda_id, {}).get('Domanda', f"Domanda ID {domanda_id} (non trovata)")
+
+                        st.markdown(f"**Domanda {k+1}:** {testo_domanda}")
+                        st.write(f" - **Tua scelta:** {risposta_dettaglio.get('scelta_data', 'N/D')}")
+                        st.write(f" - **Corretta:** {risposta_dettaglio.get('corretta', 'N/D')}")
+                        st.write(f" - **Stato:** {risposta_dettaglio.get('stato_risposta', 'N/D')}")
+                        st.write(f" - **Punti assegnati:** {risposta_dettaglio.get('punteggio_assegnato', 0.0):.2f}")
+                        st.markdown("---") # Linea separatrice tra i dettagli delle risposte
 
 # --- Modalità Esercizi ---
 def esercizi():
     st.header("Modalità Esercizi")
 
-    # Inizializzazione degli stati per gli esercizi
     if "quiz" not in st.session_state:
         st.session_state.quiz = carica_quiz()
-        random.shuffle(st.session_state.quiz) # Rimescola l'ordine delle domande una volta sola
+        random.shuffle(st.session_state.quiz)
         st.session_state.indice = 0
-        st.session_state.risposte_date = {} # True/False per ogni domanda (indice)
-        st.session_state.ordine_risposte = {} # Ordine rimescolato delle opzioni per ogni domanda (indice)
-        st.session_state.risposta_confermata = False # True se la risposta attuale è stata confermata
-        st.session_state.domande_errate_ids = [] # Lista degli ID delle domande a cui si è risposto in modo errato in questa sessione
+        st.session_state.risposte_date = {}
+        st.session_state.ordine_risposte = {}
+        st.session_state.risposta_confermata = False
+        st.session_state.domande_errate_ids = []
 
     quiz = st.session_state.quiz
     i = st.session_state.indice
@@ -107,39 +158,29 @@ def esercizi():
         q = quiz[i]
         st.write(f"**Domanda {i+1}/{len(quiz)}:** {q['Domanda']}")
 
-        # Rimescola e memorizza l'ordine delle opzioni solo la prima volta per questa domanda
         if i not in st.session_state.ordine_risposte:
-            # Assicurati di prendere tutte le opzioni possibili (A, B, C, D, ecc.)
             opzioni_originali = [
                 str(q.get("Risposta A", "")),
                 str(q.get("Risposta B", "")),
                 str(q.get("Risposta C", "")),
-                # Aggiungi altre opzioni se presenti nel tuo Excel (es. Risposta D)
+                # Aggiungi altre opzioni se presenti
             ]
-            opzioni_valide = [o for o in opzioni_originali if o.strip() != ""] # Filtra risposte vuote
-            
+            opzioni_valide = [o for o in opzioni_originali if o.strip() != ""]
             random.shuffle(opzioni_valide)
             st.session_state.ordine_risposte[i] = opzioni_valide
 
         risp_ordinate = st.session_state.ordine_risposte[i]
 
-        # Recupera la scelta precedente se esiste per mantenere la selezione del radio button
         current_scelta = st.session_state.get(f"scelta_q{i}", None)
-        # Determina l'indice pre-selezionato per il radio button
         index_selezionato = risp_ordinate.index(current_scelta) if current_scelta in risp_ordinate else 0
         
-        # Mostra il radio button
         scelta = st.radio("Seleziona la risposta:", risp_ordinate, key=f"q{i}", index=index_selezionato,
-                          disabled=st.session_state.risposta_confermata) # Disabilita dopo la conferma
-        
-        # Aggiorna la scelta nello stato di sessione immediatamente
+                          disabled=st.session_state.risposta_confermata)
         st.session_state[f"scelta_q{i}"] = scelta
 
 
-        # Logica per mostrare il bottone "Conferma" o "Prossima domanda" e il feedback
         if not st.session_state.risposta_confermata:
             if st.button("Conferma risposta"):
-                # Logica di controllo della risposta
                 corretta_lettera = str(q.get("Corretta", "")).strip().upper()
                 chiave_risposta_corretta = f"Risposta {corretta_lettera}"
                 
@@ -160,10 +201,9 @@ def esercizi():
                     else:
                         st.warning(f"Attenzione: Domanda {i+1} sbagliata ma senza ID per il salvataggio nel profilo.")
 
-                st.session_state.risposta_confermata = True # Imposta lo stato per mostrare "Prossima"
-                st.rerun() # Rerun per aggiornare l'UI e mostrare il feedback e il nuovo bottone
-        else: # Se la risposta è stata confermata, mostra il feedback e il bottone Prossima
-            # Ri-mostra il feedback dopo il rerun
+                st.session_state.risposta_confermata = True
+                st.rerun()
+        else:
             corretta_lettera = str(q.get("Corretta", "")).strip().upper()
             chiave_risposta_corretta = f"Risposta {corretta_lettera}"
             corretta_text = str(q[chiave_risposta_corretta]).strip()
@@ -175,11 +215,11 @@ def esercizi():
 
             if st.button("Prossima domanda"):
                 st.session_state.indice += 1
-                st.session_state.risposta_confermata = False # Resetta per la prossima domanda
-                st.session_state.pop(f"scelta_q{i}", None) # Rimuovi la scelta precedente per la nuova domanda
+                st.session_state.risposta_confermata = False
+                st.session_state.pop(f"scelta_q{i}", None)
                 st.rerun()
 
-    else: # Fine degli esercizi
+    else:
         corrette = sum(st.session_state.risposte_date.values())
         totale_domande = len(quiz)
         st.write("---")
@@ -188,28 +228,23 @@ def esercizi():
         if totale_domande > 0:
             st.write(f"Percentuale di risposte corrette: **{(corrette / totale_domande * 100):.1f}%**")
         
-        # Salvataggio delle domande errate nel profilo utente
         utenti = carica_utenti()
         username = st.session_state.username
 
         if username not in utenti:
-            utenti[username] = {} # Assicurati che l'utente esista nel dizionario
+            utenti[username] = {}
 
-        # Aggiorna la lista delle domande errate (aggiungendo quelle di questa sessione)
-        # Usiamo un set per evitare duplicati se la stessa domanda è sbagliata più volte
         current_errate_ids = set(utenti[username].get('domande_errate_ids', []))
         current_errate_ids.update(st.session_state.domande_errate_ids)
-        utenti[username]['domande_errate_ids'] = list(current_errate_ids) # Converti di nuovo in lista per il JSON
+        utenti[username]['domande_errate_ids'] = list(current_errate_ids)
 
         salva_utenti(utenti)
         st.info(f"Le tue domande errate sono state salvate nel tuo profilo.")
 
         if st.button("Ricomincia Esercizi"):
-            # Resetta tutti gli stati per ricominciare gli esercizi
             for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
-                         "risposta_confermata", "domande_errate_ids"]: # Rimuovi anche lo stato di scelta per ogni domanda
+                         "risposta_confermata", "domande_errate_ids"]:
                 st.session_state.pop(key, None)
-            # Rimuovi tutte le chiavi di scelta radio generate dinamicamente (es. scelta_q0, scelta_q1)
             for key in list(st.session_state.keys()):
                 if key.startswith("scelta_q"):
                     st.session_state.pop(key)
@@ -219,17 +254,16 @@ def esercizi():
 def simulazione_esame():
     st.header("Simulazione Esame")
 
-    # Inizializzazione degli stati per la simulazione
     if "esame_domande" not in st.session_state:
         full_quiz = carica_quiz()
-        n_domande_esame = min(40, len(full_quiz)) # Limite a 40 o meno se le domande sono meno
-        st.session_state.esame_domande = random.sample(full_quiz, n_domande_esame) # Seleziona un sottoinsieme casuale
+        n_domande_esame = min(40, len(full_quiz))
+        st.session_state.esame_domande = random.sample(full_quiz, n_domande_esame)
         st.session_state.esame_indice = 0
         st.session_state.esame_punteggio = 0.0
-        st.session_state.esame_ordine_risposte = {} # Ordine rimescolato delle opzioni per ogni domanda
-        st.session_state.esame_risposte_date = {} # Registra le risposte date per l'esame (per un riepilogo futuro)
-        st.session_state.esame_domande_errate_ids = [] # IDs delle domande sbagliate in questa simulazione
-        st.session_state.esame_confermato = False # Stato per il feedback dell'esame
+        st.session_state.esame_ordine_risposte = {}
+        st.session_state.esame_risposte_dettaglio = [] # Nuovo: Dettaglio di ogni risposta data (per storico)
+        st.session_state.esame_domande_errate_ids = []
+        st.session_state.esame_confermato = False
         
     domande = st.session_state.esame_domande
     j = st.session_state.esame_indice
@@ -238,13 +272,11 @@ def simulazione_esame():
         q = domande[j]
         st.write(f"**Domanda {j+1}/{len(domande)}:** {q['Domanda']}")
 
-        # Rimescola e memorizza l'ordine delle risposte solo la prima volta per l'esame
         if j not in st.session_state.esame_ordine_risposte:
             opzioni_originali = [
                 str(q.get("Risposta A", "")),
                 str(q.get("Risposta B", "")),
                 str(q.get("Risposta C", "")),
-                # Aggiungi altre opzioni se presenti
             ]
             opzioni_valide = [o for o in opzioni_originali if o.strip() != ""]
             random.shuffle(opzioni_valide)
@@ -252,18 +284,15 @@ def simulazione_esame():
         
         risp_ordinate = st.session_state.esame_ordine_risposte[j]
 
-        # La scelta dell'utente è persistente se il feedback non è ancora mostrato
         current_es_scelta = st.session_state.get(f"es_scelta_q{j}", None)
-        # Per la simulazione esame c'è anche l'opzione "lascia vuoto"
-        opzioni_radio_esame = [""] + risp_ordinate # Aggiungi l'opzione vuota
+        opzioni_radio_esame = [""] + risp_ordinate
         
         index_selezionato_esame = 0
         if current_es_scelta in opzioni_radio_esame:
             index_selezionato_esame = opzioni_radio_esame.index(current_es_scelta)
 
         scelta = st.radio("Risposta (lascia vuoto per omettere):", opzioni_radio_esame, key=f"es{j}", index=index_selezionato_esame,
-                          disabled=st.session_state.esame_confermato) # Disabilita dopo la conferma
-        
+                          disabled=st.session_state.esame_confermato)
         st.session_state[f"es_scelta_q{j}"] = scelta
 
 
@@ -279,50 +308,63 @@ def simulazione_esame():
                 corretta_text = str(q[chiave_risposta_corretta]).strip()
                 
                 pun = 0
-                feedback_msg = ""
+                stato_risposta = ""
                 
                 if scelta == "":
                     pun = 0
-                    feedback_msg = "⚠️ Domanda omessa."
+                    stato_risposta = "omessa"
+                    st.info("⚠️ Domanda omessa.")
                 elif scelta == corretta_text:
                     pun = 0.75
-                    feedback_msg = "✅ Risposta corretta!"
+                    stato_risposta = "corretta"
+                    st.success("✅ Risposta corretta!")
                 else:
                     pun = -0.25
-                    feedback_msg = f"❌ Errata. Risposta corretta: **{corretta_text}**"
+                    stato_risposta = "sbagliata"
+                    st.error(f"❌ Errata. Risposta corretta: **{corretta_text}**")
                     if 'ID' in q:
                         st.session_state.esame_domande_errate_ids.append(q['ID'])
                     else:
                         st.warning(f"Attenzione: Domanda {j+1} sbagliata ma senza ID per il salvataggio nel profilo.")
 
                 st.session_state.esame_punteggio += pun
-                # Salva la risposta data e la corretta per un possibile riepilogo finale
-                st.session_state.esame_risposte_date[j] = {"scelta_data": scelta, "corretta": corretta_text, "punteggio": pun}
                 
-                if "⚠️" in feedback_msg:
-                    st.info(feedback_msg)
-                elif "✅" in feedback_msg:
-                    st.success(feedback_msg)
-                else:
-                    st.error(feedback_msg)
+                # Aggiungi i dettagli della risposta alla lista per lo storico
+                st.session_state.esame_risposte_dettaglio.append({
+                    "id_domanda": q.get('ID'), # Salva l'ID della domanda
+                    "scelta_data": scelta,
+                    "corretta": corretta_text,
+                    "stato_risposta": stato_risposta,
+                    "punteggio_assegnato": pun
+                })
+                
+                st.session_state.esame_confermato = True
+                st.rerun()
 
-                st.session_state.esame_confermato = True # Imposta lo stato per mostrare "Prossima"
-                st.rerun() # Rerun per aggiornare l'UI e mostrare il feedback e il nuovo bottone
+        else:
+            # Recupera i dettagli della risposta per ri-visualizzare il feedback
+            # Questo è l'ultimo dettaglio della risposta aggiunto per la domanda corrente 'j'
+            # ATTENZIONE: Questo potrebbe dare problemi se la lista non è perfettamente allineata con 'j'
+            # Meglio recuperarlo dal dizionario 'esame_risposte_dettaglio' per l'ID della domanda,
+            # ma per semplicità assumiamo sia l'ultimo elemento.
+            
+            # Una soluzione più robusta sarebbe:
+            risposta_dettaglio_corrente = next((item for item in st.session_state.esame_risposte_dettaglio if item.get('id_domanda') == q.get('ID')), None)
 
-        else: # Se la risposta è stata confermata, mostra il feedback e il bottone Prossima
-            # Ri-mostra il feedback dopo il rerun
-            feedback_data = st.session_state.esame_risposte_date[j]
-            if feedback_data["scelta_data"] == "":
-                st.info("⚠️ Domanda omessa.")
-            elif feedback_data["scelta_data"] == feedback_data["corretta"]:
-                st.success("✅ Risposta corretta!")
-            else:
-                st.error(f"❌ Errata. Risposta corretta: **{feedback_data['corretta']}**")
+            if risposta_dettaglio_corrente:
+                if risposta_dettaglio_corrente['stato_risposta'] == "omessa":
+                    st.info("⚠️ Domanda omessa.")
+                elif risposta_dettaglio_corrente['stato_risposta'] == "corretta":
+                    st.success("✅ Risposta corretta!")
+                else: # stato_risposta == "sbagliata"
+                    st.error(f"❌ Errata. Risposta corretta: **{risposta_dettaglio_corrente['corretta']}**")
+            else: # Fallback se per qualche motivo il dettaglio non si trova
+                st.warning("Feedback non disponibile.")
 
             if st.button("Prossima domanda", key=f"btn_prossima_esame_{j}"):
                 st.session_state.esame_indice += 1
-                st.session_state.esame_confermato = False # Resetta per la prossima domanda
-                st.session_state.pop(f"es_scelta_q{j}", None) # Rimuovi la scelta precedente
+                st.session_state.esame_confermato = False
+                st.session_state.pop(f"es_scelta_q{j}", None)
                 st.rerun()
 
     else: # Fine della simulazione d'esame
@@ -335,37 +377,43 @@ def simulazione_esame():
 
         st.write(f"Punteggio finale: **{punteggio_finale:.2f}** su **{punteggio_max_possibile:.2f}**")
 
-        if punteggio_max_possibile > 0: # Evita divisione per zero
+        if punteggio_max_possibile > 0:
             percentuale = (punteggio_finale / punteggio_max_possibile) * 100
             st.write(f"Percentuale: **{percentuale:.1f}%**")
         else:
             st.write("Nessuna domanda nel quiz per calcolare la percentuale.")
 
-        # Salvataggio delle domande errate e del punteggio finale nel profilo utente
+        # Salvataggio nel profilo utente (incluso lo storico)
         utenti = carica_utenti()
         username = st.session_state.username
 
         if username not in utenti:
             utenti[username] = {}
+        if 'storico_simulazioni' not in utenti[username]:
+            utenti[username]['storico_simulazioni'] = []
 
-        # Salva il punteggio dell'ultima simulazione
-        utenti[username]['ultimo_punteggio_esame'] = punteggio_finale
-        utenti[username]['data_ultimo_esame'] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Aggiungi i dettagli della simulazione allo storico
+        simulazione_record = {
+            'data': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            'punteggio_finale': punteggio_finale,
+            'domande_totali': tot_domande_esame,
+            'punteggio_max_possibile': punteggio_max_possibile,
+            'dettaglio_risposte': st.session_state.esame_risposte_dettaglio # Salva il riepilogo
+        }
+        utenti[username]['storico_simulazioni'].append(simulazione_record)
 
-        # Aggiorna la lista delle domande errate dell'esame
+        # Aggiorna anche la lista delle domande errate (opzionale, dato che il dettaglio include tutto)
         current_errate_ids_esame = set(utenti[username].get('domande_errate_esame_ids', []))
         current_errate_ids_esame.update(st.session_state.esame_domande_errate_ids)
         utenti[username]['domande_errate_esame_ids'] = list(current_errate_ids_esame)
 
         salva_utenti(utenti)
-        st.info(f"Il tuo punteggio e le domande errate sono stati salvati nel tuo profilo.")
+        st.info(f"Il tuo punteggio e lo storico dell'esame sono stati salvati nel tuo profilo.")
 
         if st.button("Nuova Simulazione"):
-            # Resetta tutti gli stati per ricominciare una simulazione
             for key in ["esame_domande", "esame_indice", "esame_punteggio", "esame_ordine_risposte",
-                         "esame_risposte_date", "esame_domande_errate_ids", "esame_confermato"]:
+                         "esame_risposte_dettaglio", "esame_domande_errate_ids", "esame_confermato"]:
                 st.session_state.pop(key, None)
-            # Rimuovi tutte le chiavi di scelta radio generate dinamicamente
             for key in list(st.session_state.keys()):
                 if key.startswith("es_scelta_q"):
                     st.session_state.pop(key)
@@ -375,7 +423,6 @@ def simulazione_esame():
 def main():
     login()
     if st.session_state.get("logged_in", False):
-        # Mantiene la modalità selezionata dall'utente in sidebar
         m = st.session_state.get("modalita", "Esercizi")
         if m == "Esercizi":
             esercizi()
