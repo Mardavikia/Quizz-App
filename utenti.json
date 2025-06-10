@@ -1,11 +1,16 @@
 {
-  "mario": {
+  "eugenia": {
     "password": "password123",
     "errori": [],
     "storico": []
   },
   "anna": {
-    "password": "ciao456",
+    "password": "password123",
+    "errori": [],
+    "storico": []
+  },
+  "danilo": {
+    "password": "password123",
     "errori": [],
     "storico": []
   }
