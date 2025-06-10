@@ -82,14 +82,10 @@ def esercizi():
         scelta = st.radio("Seleziona la risposta:", risposte, key=f"q{indice}")
 
         if st.button("Conferma risposta"):
-            corretta = str(domanda["Corretta"]).strip().upper()
-chiave = f"Risposta {corretta}"
+            corretta = domanda["Corretta"].strip()
+            risposta_corretta = domanda[f"Risposta {corretta}"].strip()
 
-if chiave not in domanda:
-    st.error(f"Errore: la chiave '{chiave}' non esiste nella domanda.")
-    st.stop()
-
-risposta_corretta = domanda[chiave].strip()
+            st.session_state.risposte_date[indice] = (scelta == risposta_corretta)
             if scelta == risposta_corretta:
                 st.success("✅ Risposta corretta!")
             else:
