@@ -1,202 +1,186 @@
 import streamlit as st
 import pandas as pd
-import random
 import json
 import os
+import random
 
-# --- CONFIG PATH FILE ---
 UTENTI_FILE = "utenti.json"
 QUIZ_FILE = "quiz.xlsx"
 
-# --- UTILI PER JSON ---
+# Funzioni per gestire utenti
 def carica_utenti():
     if not os.path.exists(UTENTI_FILE):
-        # file vuoto se non esiste
         with open(UTENTI_FILE, "w") as f:
             json.dump({}, f)
-    with open(UTENTI_FILE, "r") as f:
-        return json.load(f)
+    try:
+        with open(UTENTI_FILE, "r") as f:
+            content = f.read().strip()
+            if not content:
+                return {}
+            return json.loads(content)
+    except json.JSONDecodeError:
+        with open(UTENTI_FILE, "w") as f:
+            json.dump({}, f)
+        return {}
 
-def salva_utenti(data):
+def salva_utenti(utenti):
     with open(UTENTI_FILE, "w") as f:
-        json.dump(data, f, indent=4)
+        json.dump(utenti, f, indent=4)
 
-# --- LOGIN ---
+# Login semplice
 def login():
-    st.title("🔐 Login")
-    utenti = carica_utenti()
-    username = st.text_input("Username")
-    password = st.text_input("Password", type="password")
-    if st.button("Accedi"):
-        if username in utenti and utenti[username]["password"] == password:
-            st.session_state["username"] = username
-            st.session_state["utenti"] = utenti
-            st.success(f"Benvenuto, {username}!")
-            st.experimental_rerun()
-        else:
-            st.error("Username o password errati.")
-    st.stop()
+    if 'logged_in' not in st.session_state:
+        st.session_state.logged_in = False
+    if 'username' not in st.session_state:
+        st.session_state.username = ""
 
-# --- CARICAMENTO QUIZ ---
+    if not st.session_state.logged_in:
+        st.title("Login")
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        if st.button("Login"):
+            utenti = carica_utenti()
+            if username in utenti and utenti[username]["password"] == password:
+                st.session_state.logged_in = True
+                st.session_state.username = username
+                st.experimental_rerun()
+            else:
+                st.error("Username o password errati")
+    else:
+        st.sidebar.write(f"Benvenuto, {st.session_state.username}!")
+        if st.sidebar.button("Logout"):
+            st.session_state.logged_in = False
+            st.session_state.username = ""
+            st.experimental_rerun()
+
+# Carica quiz da Excel
 @st.cache_data
 def carica_quiz():
     df = pd.read_excel(QUIZ_FILE)
-    df.columns = df.columns.str.strip()
-    return df
+    return df.to_dict(orient="records")
 
-# --- FUNZIONI AIUTO ---
-def inizializza_sessione(username, df):
-    if "username" not in st.session_state or st.session_state["username"] != username:
-        st.session_state.clear()
-        st.session_state["username"] = username
-        st.session_state["domande"] = df.copy()
-        st.session_state["corrette"] = 0
-        st.session_state["sbagliate"] = 0
-        st.session_state["indici_sbagliate"] = set()
-        st.session_state["indice"] = 0
-        st.session_state["mostra_risposta"] = False
-        st.session_state["modalita"] = "esercitazione"  # o "esame"
-        st.session_state["esame_risposte"] = []  # per punteggio esame
-        st.session_state["lista_domande"] = []
-        st.session_state["errori_utente"] = set()
-        st.session_state["esame_terminato"] = False
+# Funzione per mischiare risposte e mantenerle associate alle lettere
+def mischia_risposte(domanda):
+    opzioni = {
+        "A": domanda["Risposta A"],
+        "B": domanda["Risposta B"],
+        "C": domanda["Risposta C"],
+    }
+    lista = list(opzioni.items())
+    random.shuffle(lista)
+    return lista  # ritorna lista di tuple (lettera, testo)
 
-def miscela_risposte(domanda):
-    risposte = [
-        domanda["Risposta A"].strip(),
-        domanda["Risposta B"].strip(),
-        domanda["Risposta C"].strip()
-    ]
-    random.shuffle(risposte)
-    return risposte
+# Pagina principale quiz
+def quiz_app():
+    st.title("Quiz")
 
-# --- FUNZIONE PRINCIPALE APP ---
-def main():
-    if "username" not in st.session_state:
-        login()
+    quiz = carica_quiz()
+    utenti = carica_utenti()
+    username = st.session_state.username
 
-    utenti = st.session_state.get("utenti", {})
-    username = st.session_state["username"]
-    df = carica_quiz()
+    if username not in utenti:
+        utenti[username] = {"password": "", "errori": [], "storico": []}
 
-    # Carica dati utente da json
-    dati_utente = utenti.get(username, {"password": "", "errori": [], "storico": []})
+    modalità = st.radio("Modalità", ["Tutte le domande", "Solo domande sbagliate", "Simula esame"])
 
-    # Scelta modalità
-    st.sidebar.title(f"Benvenuto, {username}")
-    modalita = st.sidebar.radio("Scegli modalità:", ["Esercitazione", "Ripassa errori", "Simulazione esame"])
-    st.session_state["modalita"] = modalita.lower()
+    # Se modalità "Solo domande sbagliate" e non ce ne sono, avvisa e esci
+    if modalità == "Solo domande sbagliate" and not utenti[username]["errori"]:
+        st.warning("Non hai ancora domande sbagliate. Prova con tutte le domande.")
+        return
 
-    # Inizializza quiz in base a modalità
-    if "indice" not in st.session_state or st.session_state["modalita"] != modalita.lower():
-        st.session_state.clear()
-        st.session_state["username"] = username
-        st.session_state["modalita"] = modalita.lower()
-        st.session_state["corrette"] = 0
-        st.session_state["sbagliate"] = 0
-        st.session_state["indice"] = 0
-        st.session_state["mostra_risposta"] = False
-        st.session_state["esame_risposte"] = []
-        st.session_state["esame_terminato"] = False
+    if modalità == "Simula esame":
+        domande = random.sample(quiz, min(40, len(quiz)))
+        punteggio = 0.0
+        domanda_idx = st.session_state.get("domanda_idx", 0)
+        risposte_date = st.session_state.get("risposte_date", [])
 
-        if modalita == "Esercitazione":
-            st.session_state["lista_domande"] = df.sample(frac=1).reset_index(drop=True)
-        elif modalita == "Ripassa errori":
-            if not dati_utente["errori"]:
-                st.info("Non hai errori da ripassare, torna in Esercitazione.")
-                st.stop()
-            else:
-                st.session_state["lista_domande"] = df.loc[dati_utente["errori"]].reset_index(drop=True)
-        else:  # Simulazione esame
-            if len(df) < 40:
-                st.error("Il quiz non ha abbastanza domande per l'esame (minimo 40 richieste).")
-                st.stop()
-            st.session_state["lista_domande"] = df.sample(n=40).reset_index(drop=True)
-
-    lista_domande = st.session_state["lista_domande"]
-    indice = st.session_state["indice"]
-
-    if indice >= len(lista_domande):
-        # Fine quiz/esame
-        if st.session_state["modalita"] == "simulazione esame":
-            punteggio = 0
-            for r in st.session_state["esame_risposte"]:
-                if r == "omessa":
-                    punteggio += 0
-                elif r == "corretta":
-                    punteggio += 0.75
-                else:
-                    punteggio -= 0.25
-            st.header("🎉 Esame terminato!")
-            st.write(f"Punteggio finale: **{punteggio:.2f}** su massimo 30 punti (40 domande * 0.75)")
-            st.write(f"Risposte corrette: {st.session_state['corrette']}")
-            st.write(f"Risposte errate: {st.session_state['sbagliate']}")
-            st.write(f"Domande omesse: {st.session_state['indice'] - st.session_state['corrette'] - st.session_state['sbagliate']}")
-            # Salva storico
-            utenti[username]["storico"].append({"tipo": "esame", "punteggio": punteggio})
-            salva_utenti(utenti)
+        if domanda_idx >= len(domande):
+            st.write(f"**Esame terminato! Punteggio finale: {punteggio:.2f}**")
             if st.button("Ricomincia"):
-                st.session_state.clear()
-                st.experimental_rerun()
-            return
-        else:
-            st.header("🎉 Hai completato il quiz!")
-            st.write(f"Punteggio: {st.session_state['corrette']} corrette su {len(lista_domande)} domande")
-            st.write(f"Errori totali: {st.session_state['sbagliate']}")
-            if st.button("Ricomincia"):
-                st.session_state.clear()
+                st.session_state.domanda_idx = 0
+                st.session_state.risposte_date = []
                 st.experimental_rerun()
             return
 
-    domanda = lista_domande.iloc[indice]
-    st.subheader(f"Domanda {indice+1} / {len(lista_domande)}")
-    st.write(domanda["Domanda"])
+        domanda = domande[domanda_idx]
+        st.write(f"Domanda {domanda_idx + 1} di {len(domande)}:")
+        st.write(domanda["Domanda"])
 
-    risposte_mischiate = miscela_risposte(domanda)
+        opzioni = mischia_risposte(domanda)
+        scelta = st.radio("Scegli la risposta:", [t[1] for t in opzioni], key=f"q{domanda_idx}")
 
-    corretta_lettera = domanda["Corretta"].strip().upper()
-    corretta_testo = domanda[f"Risposta {corretta_lettera}"].strip()
-
-    risposta_utente = st.radio("Scegli una risposta:", options=risposte_mischiate + ["Omessa"], index=len(risposte_mischiate), key=f"risposta_{indice}")
-
-    if not st.session_state["mostra_risposta"]:
         if st.button("Conferma risposta"):
-            st.session_state["mostra_risposta"] = True
+            # trova la lettera scelta
+            scelta_lettera = None
+            for lettera, testo in opzioni:
+                if testo == scelta:
+                    scelta_lettera = lettera
+                    break
 
-            if risposta_utente == "Omessa":
-                st.session_state["esame_risposte"].append("omessa")
-            elif risposta_utente == corretta_testo:
-                st.session_state["corrette"] += 1
-                st.session_state["esame_risposte"].append("corretta")
+            corretta = domanda["Risposta Corretta"].strip().upper()
+            # Calcola punteggio
+            if scelta_lettera == corretta:
+                punteggio += 0.75
+            elif scelta_lettera is None:
+                # risposta omessa
+                punteggio += 0
             else:
-                st.session_state["sbagliate"] += 1
-                st.session_state["esame_risposte"].append("errata")
-                # Salva errore in json (indice reale)
-                pos_domanda = domanda.name
-                if pos_domanda not in dati_utente["errori"]:
-                    dati_utente["errori"].append(pos_domanda)
-                    utenti[username]["errori"] = dati_utente["errori"]
-                    salva_utenti(utenti)
-    else:
-        if risposta_utente == "Omessa":
-            st.info("Hai omesso questa domanda.")
-        elif risposta_utente == corretta_testo:
-            st.success("✅ Risposta corretta!")
-        else:
-            st.error(f"❌ Risposta errata! La risposta corretta era: **{corretta_testo}**")
+                punteggio -= 0.25
 
-        if st.button("Domanda successiva"):
-            st.session_state["indice"] += 1
-            st.session_state["mostra_risposta"] = False
+            st.session_state.risposte_date.append((domanda_idx, scelta_lettera))
+            st.session_state.domanda_idx = domanda_idx + 1
             st.experimental_rerun()
 
-    # Barra progresso e info utente
-    st.sidebar.markdown(f"**Utente:** {username}")
-    st.sidebar.markdown(f"**Modalità:** {modalita}")
-    st.sidebar.markdown(f"**Domanda:** {indice + 1} / {len(lista_domande)}")
-    st.sidebar.markdown(f"✅ Corrette: {st.session_state['corrette']}")
-    st.sidebar.markdown(f"❌ Sbagliate: {st.session_state['sbagliate']}")
-    st.sidebar.markdown(f"📌 Errori da ripassare: {len(dati_utente['errori'])}")
+    else:
+        if modalità == "Solo domande sbagliate":
+            # Filtro solo domande sbagliate
+            domande = [q for i, q in enumerate(quiz) if i in utenti[username]["errori"]]
+        else:
+            domande = quiz
+
+        # Scegli domanda a caso
+        domanda = random.choice(domande)
+        st.write(domanda["Domanda"])
+
+        opzioni = mischia_risposte(domanda)
+        scelta = st.radio("Scegli la risposta:", [t[1] for t in opzioni], key="quiz_radio")
+
+        if st.button("Conferma risposta"):
+            scelta_lettera = None
+            for lettera, testo in opzioni:
+                if testo == scelta:
+                    scelta_lettera = lettera
+                    break
+            corretta = domanda["Risposta Corretta"].strip().upper()
+
+            if scelta_lettera == corretta:
+                st.success("✅ Risposta corretta!")
+                # rimuovi la domanda dagli errori se c'era
+                try:
+                    index_domanda = quiz.index(domanda)
+                except:
+                    index_domanda = None
+                if index_domanda is not None and index_domanda in utenti[username]["errori"]:
+                    utenti[username]["errori"].remove(index_domanda)
+            else:
+                st.error(f"❌ Risposta sbagliata. La risposta corretta era: {domanda[f'Risposta {corretta}']}")
+                # salva errore
+                try:
+                    index_domanda = quiz.index(domanda)
+                except:
+                    index_domanda = None
+                if index_domanda is not None and index_domanda not in utenti[username]["errori"]:
+                    utenti[username]["errori"].append(index_domanda)
+
+            # Salva utenti aggiornati
+            salva_utenti(utenti)
+
+            st.experimental_rerun()
+
+def main():
+    login()
+    if st.session_state.get("logged_in", False):
+        quiz_app()
 
 if __name__ == "__main__":
     main()
