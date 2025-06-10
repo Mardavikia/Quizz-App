@@ -73,16 +73,14 @@ def login():
             st.sidebar.success(f"Domande conosciute: **{len(domande_conosciute_utente)}**")
             st.sidebar.warning(f"Domande non conosciute: **{domande_non_conosciute_count}**")
             
+            # Inizializza risposte_date se non esiste (per evitare errori di KeyError nella sidebar)
+            if "risposte_date" not in st.session_state:
+                st.session_state.risposte_date = {}
+
             # Contatori Risposte Corrette e Sbagliate per la sessione corrente di esercizi
             if st.session_state.get("modalita") == "Esercizi":
-                # Assicurati che risposte_date sia un dizionario valido prima di usarlo
-                if "risposte_date" in st.session_state:
-                    corrette_sessione = sum(1 for status in st.session_state.risposte_date.values() if status is True)
-                    sbagliate_sessione = sum(1 for status in st.session_state.risposte_date.values() if status is False)
-                else:
-                    corrette_sessione = 0
-                    sbagliate_sessione = 0
-
+                corrette_sessione = sum(1 for status in st.session_state.get("risposte_date", {}).values() if status is True)
+                sbagliate_sessione = sum(1 for status in st.session_state.get("risposte_date", {}).values() if status is False)
                 st.sidebar.markdown(f"**Risposte corrette:** <span style='color:green;'>{corrette_sessione}</span>", unsafe_allow_html=True)
                 st.sidebar.markdown(f"**Risposte sbagliate:** <span style='color:red;'>{sbagliate_sessione}</span>", unsafe_allow_html=True)
             
@@ -104,9 +102,9 @@ def login():
                         st.session_state.pop(key)
             else: # Simulazione Esame
                 # Resetta gli stati degli esercizi, inclusi quelli per la persistenza della sequenza
-                for key in ["quiz", "indice", "risposte_date", "ordine_risposte", # risposte_date qui per pulizia
+                for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
                             "risposta_confermata", "domande_errate_ids", "domande_conosciute_ids",
-                            "ultimo_indice_esercizi", "sequenza_esercizi_corrente"]:
+                            "ultimo_indice_esercizi", "sequenza_esercizi_corrente"]: 
                     st.session_state.pop(key, None)
                 for key in list(st.session_state.keys()):
                     if key.startswith("scelta_q"):
@@ -196,10 +194,6 @@ def esercizi():
     
     domande_conosciute_utente = set(utenti[username]['domande_conosciute_ids'])
     
-    # Inizializzazione di risposte_date solo se non è già presente
-    if "risposte_date" not in st.session_state:
-        st.session_state.risposte_date = {}
-
     # Inizializzazione del quiz per la sessione o ripristino dalla persistenza
     if "quiz" not in st.session_state or not st.session_state.quiz:
         full_quiz_map = {q['ID']: q for q in carica_quiz()} # Mappa ID -> Domanda
@@ -214,7 +208,7 @@ def esercizi():
             st.warning("Hai segnato tutte le domande come 'conosciute' o non ci sono domande disponibili. Premi 'Ricomincia Esercizi' per ripartire da tutte le domande.")
             st.session_state.quiz = []
             st.session_state.indice = 0
-            st.session_state.risposte_date = {} # Resetta qui per una nuova sessione
+            st.session_state.risposte_date = {}
             st.session_state.ordine_risposte = {}
             st.session_state.risposta_confermata = False
             st.session_state.domande_errate_ids = []
@@ -222,7 +216,7 @@ def esercizi():
             if st.button("Ricomincia Esercizi (includi tutte le domande)", key="ricomincia_all_domande_main"):
                 utenti[username]['domande_conosciute_ids'] = []
                 utenti[username]['ultimo_indice_esercizi'] = 0
-                utenti[username]['sequenza_esercizi_corrente'] = [] # Resetta anche la sequenza
+                utenti[username]['sequenza_esercizi_corrente'] = [] 
                 salva_utenti(utenti)
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
                              "risposta_confermata", "domande_errate_ids"]:
@@ -243,7 +237,7 @@ def esercizi():
             
             # Se la sequenza salvata è diventata vuota o incompleta a causa di domande conosciute/rimosse,
             # o se ci sono nuove domande non incluse, ricarica e rimescola le rimanenti.
-            # O se la lunghezza della sequenza salvata non corrisponde alle domande non conosciute attuali
+            # Questo assicura che se marchi una domanda come "conosciuta" o se il quiz cambia, la sequenza si adatti.
             if not quiz_della_sessione or len(quiz_della_sessione) < len(domande_non_conosciute):
                 st.info("La sequenza salvata è stata aggiornata per riflettere le domande 'conosciute' o nuove domande.")
                 random.shuffle(domande_non_conosciute)
@@ -263,7 +257,12 @@ def esercizi():
         ultimo_indice_salvato = utenti[username].get('ultimo_indice_esercizi', 0)
         st.session_state.indice = min(ultimo_indice_salvato, len(quiz_della_sessione) - 1) if quiz_della_sessione else 0
         
-        # Non resettare st.session_state.risposte_date qui se non si sta iniziando una nuova sessione ex-novo
+        # Inizializza risposte_date qui se non è già stata inizializzata dalla login per la sidebar
+        if "risposte_date" not in st.session_state:
+             st.session_state.risposte_date = {} 
+        else: # Se già presente, la puliamo per la nuova sessione di esercizi
+             st.session_state.risposte_date = {}
+
         st.session_state.ordine_risposte = {}
         st.session_state.risposta_confermata = False
         st.session_state.domande_errate_ids = []
@@ -308,7 +307,6 @@ def esercizi():
 
                     corretta_text = str(q[chiave_risposta_corretta]).strip()
 
-                    # Qui si registra lo stato della risposta nella sessione
                     st.session_state.risposte_date[i] = (scelta == corretta_text)
 
                     if scelta == corretta_text:
@@ -321,11 +319,11 @@ def esercizi():
                             st.warning(f"Attenzione: Domanda {i+1} sbagliata ma senza ID per il salvataggio nel profilo.")
 
                     st.session_state.risposta_confermata = True
-                    st.rerun() # Ricarica per aggiornare i contatori nella sidebar
+                    st.rerun() 
             else:
                 corretta_lettera = str(q.get("Corretta", "")).strip().upper()
                 chiave_risposta_corretta = f"Risposta {corretta_lettera}"
-                corretta_text = str(q[chiave_risposta_corretta]).strip()
+                corretta_text = str(q[chia_risposta_corretta]).strip()
 
                 if st.session_state.risposte_date[i]:
                     st.success("✅ Risposta corretta!")
@@ -334,7 +332,6 @@ def esercizi():
 
                 if st.button("Prossima domanda", key=f"prossima_btn_{i}"):
                     st.session_state.indice += 1
-                    # Salva l'indice attuale nel profilo utente
                     utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
                     salva_utenti(utenti)
                     
@@ -346,17 +343,15 @@ def esercizi():
             if q.get('ID') and q['ID'] not in domande_conosciute_utente:
                 if st.button("La Conosco", key=f"conosco_btn_{q['ID']}"):
                     utenti[username]['domande_conosciute_ids'].append(q['ID'])
-                    # Salva l'indice attuale nel profilo utente (anche qui, per coerenza)
-                    st.session_state.indice += 1 # Avanti di una domanda
+                    st.session_state.indice += 1 
                     utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
-                    # Quando una domanda viene segnata come conosciuta, la sequenza corrente non è più valida per l'utente,
-                    # perché quella domanda non dovrebbe più apparire. Quindi la resettiamo per forzare un rimescolamento.
+                    # Resettiamo la sequenza se una domanda viene marcata come conosciuta
                     utenti[username]['sequenza_esercizi_corrente'] = [] 
                     salva_utenti(utenti)
                     st.success(f"Domanda '{q.get('Domanda', 'N/D')}' segnata come conosciuta!")
                     st.session_state.risposta_confermata = False
                     st.session_state.pop(f"scelta_q{i}", None)
-                    st.rerun() # Ricarica per applicare il filtro e ripartire con la nuova sequenza
+                    st.rerun() 
             elif q.get('ID'):
                  st.markdown("Questa domanda è già segnata come conosciuta. ✅")
             else:
@@ -382,7 +377,6 @@ def esercizi():
         current_errate_ids.update(st.session_state.domande_errate_ids)
         utenti[username]['domande_errate_ids'] = list(current_errate_ids)
         
-        # Reset dell'indice e della sequenza salvata quando gli esercizi sono completati
         utenti[username]['ultimo_indice_esercizi'] = 0 
         utenti[username]['sequenza_esercizi_corrente'] = []
         salva_utenti(utenti)
@@ -391,11 +385,9 @@ def esercizi():
         col_ricomincia_1, col_ricomincia_2 = st.columns(2)
         with col_ricomincia_1:
             if st.button("Ricomincia Esercizi (escludi le conosciute)", key="ricomincia_escludi"):
-                # Reset dell'indice e della sequenza salvata per l'utente
                 utenti[username]['ultimo_indice_esercizi'] = 0
-                utenti[username]['sequenza_esercizi_corrente'] = [] # Resetta anche la sequenza
+                utenti[username]['sequenza_esercizi_corrente'] = [] 
                 salva_utenti(utenti)
-                # Reset degli stati della sessione
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
                              "risposta_confermata", "domande_errate_ids"]:
                     st.session_state.pop(key, None)
@@ -407,11 +399,9 @@ def esercizi():
         with col_ricomincia_2:
             if st.button("Ricomincia Esercizi (includi tutte le domande)", key="ricomincia_includi_all"):
                 utenti[username]['domande_conosciute_ids'] = []
-                # Reset dell'indice e della sequenza salvata per l'utente
                 utenti[username]['ultimo_indice_esercizi'] = 0
-                utenti[username]['sequenza_esercizi_corrente'] = [] # Resetta anche la sequenza
+                utenti[username]['sequenza_esercizi_corrente'] = [] 
                 salva_utenti(utenti)
-                # Reset degli stati della sessione
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
                              "risposta_confermata", "domande_errate_ids"]:
                     st.session_state.pop(key, None)
