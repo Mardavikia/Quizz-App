@@ -3,20 +3,27 @@ import json
 import random
 import pandas as pd
 
-# Carica utenti da JSON
+UTENTI_FILE = "utenti.json"
+QUIZ_FILE = "quiz.xlsx"
+
+# --- Funzioni Utility ---
 def carica_utenti():
     try:
-        with open("utenti.json", "r") as f:
+        with open(UTENTI_FILE, "r") as f:
             return json.load(f)
     except:
         return {}
 
-# Carica quiz da Excel
+def salva_utenti(utenti):
+    with open(UTENTI_FILE, "w") as f:
+        json.dump(utenti, f, indent=4)
+
 def carica_quiz():
-    df = pd.read_excel("quiz.xlsx")
+    df = pd.read_excel(QUIZ_FILE)
+    df.columns = df.columns.str.strip()
     return df.to_dict(orient="records")
 
-# Login
+# --- Login ---
 def login():
     if 'logged_in' not in st.session_state:
         st.session_state.logged_in = False
@@ -27,9 +34,7 @@ def login():
         st.title("Login")
         username = st.text_input("Username")
         password = st.text_input("Password", type="password")
-        login_premuto = st.button("Login")
-
-        if login_premuto:
+        if st.button("Login"):
             utenti = carica_utenti()
             if username in utenti and utenti[username]["password"] == password:
                 st.session_state.logged_in = True
@@ -37,30 +42,18 @@ def login():
                 st.session_state.login_rerun = True
             else:
                 st.error("Username o password errati")
-
         if st.session_state.get("login_rerun", False):
             st.session_state.login_rerun = False
             st.rerun()
-
     else:
         st.sidebar.write(f"Benvenuto, {st.session_state.username}!")
-        modalita = st.sidebar.radio(
-            "Scegli la modalità",
-            ("Esercizi", "Simulazione Esame"),
-            index=0
-        )
+        modalita = st.sidebar.radio("Scegli la modalità", ("Esercizi", "Simulazione Esame"))
         st.session_state.modalita = modalita
-
         if st.sidebar.button("Logout"):
-            st.session_state.logged_in = False
-            st.session_state.username = ""
-            # Pulizia stato quiz/esame
-            for key in ["quiz", "indice", "risposte_date", "esame_domande", "esame_indice", "esame_punteggio"]:
-                if key in st.session_state:
-                    del st.session_state[key]
+            st.session_state.clear()
             st.rerun()
 
-# Modalità esercizi (quiz semplice)
+# --- Modalità Esercizi ---
 def esercizi():
     st.header("Modalità Esercizi")
 
@@ -70,100 +63,88 @@ def esercizi():
         st.session_state.risposte_date = {}
 
     quiz = st.session_state.quiz
-    indice = st.session_state.indice
+    i = st.session_state.indice
 
-    if indice < len(quiz):
-        domanda = quiz[indice]
-        st.write(f"**Domanda {indice+1}:** {domanda['Domanda']}")
+    if i < len(quiz):
+        q = quiz[i]
+        st.write(f"**Domanda {i+1}:** {q['Domanda']}")
 
-        risposte = [domanda["Risposta A"], domanda["Risposta B"], domanda["Risposta C"]]
-        random.shuffle(risposte)
-
-        scelta = st.radio("Seleziona la risposta:", risposte, key=f"q{indice}")
+        risp = [q["Risposta A"], q["Risposta B"], q["Risposta C"]]
+        random.shuffle(risp)
+        scelta = st.radio("Seleziona la risposta:", risp, key=f"q{i}")
 
         if st.button("Conferma risposta"):
-            corretta = domanda["Corretta"].strip()
-            risposta_corretta = domanda[f"Risposta {corretta}"].strip()
-
-            st.session_state.risposte_date[indice] = (scelta == risposta_corretta)
-            if scelta == risposta_corretta:
+            corretta = str(q.get("Corretta", "")).strip().upper()
+            chiave = f"Risposta {corretta}"
+            if chiave not in q:
+                st.error(f"Errore interno: '{chiave}' non presente.")
+                st.stop()
+            corretta_text = str(q[chiave]).strip()
+            st.session_state.risposte_date[i] = (scelta == corretta_text)
+            if scelta == corretta_text:
                 st.success("✅ Risposta corretta!")
             else:
-                st.error(f"❌ Risposta sbagliata. La risposta corretta è: {risposta_corretta}")
-
+                st.error(f"❌ Sbagliata. La risposta corretta è: {corretta_text}")
             st.session_state.indice += 1
             st.rerun()
-
     else:
-        corrette = sum(v for v in st.session_state.risposte_date.values())
-        totale = len(st.session_state.quiz)
-        st.write(f"**Hai completato il quiz!**")
-        st.write(f"Risposte corrette: {corrette} su {totale}")
+        corrette = sum(st.session_state.risposte_date.values())
+        st.write(f"Risposte corrette: **{corrette}** su **{len(quiz)}** domande")
 
-# Modalità simulazione esame
+# --- Modalità Simulazione Esame ---
 def simulazione_esame():
-    st.header("Modalità Simulazione Esame")
+    st.header("Simulazione Esame")
 
     if "esame_domande" not in st.session_state:
-        quiz = carica_quiz()
-        # Prendi 40 domande casuali (se meno di 40 usa tutte)
-        n = min(40, len(quiz))
-        st.session_state.esame_domande = random.sample(quiz, n)
+        full = carica_quiz()
+        n = min(40, len(full))
+        st.session_state.esame_domande = random.sample(full, n)
         st.session_state.esame_indice = 0
         st.session_state.esame_punteggio = 0.0
-        st.session_state.esame_risposte = {}
 
     domande = st.session_state.esame_domande
-    indice = st.session_state.esame_indice
+    j = st.session_state.esame_indice
 
-    if indice < len(domande):
-        domanda = domande[indice]
-        st.write(f"**Domanda {indice+1} di {len(domande)}:** {domanda['Domanda']}")
+    if j < len(domande):
+        q = domande[j]
+        st.write(f"**Domanda {j+1}/{len(domande)}:** {q['Domanda']}")
+        risp = [q["Risposta A"], q["Risposta B"], q["Risposta C"]]
+        random.shuffle(risp)
+        scelta = st.radio("Risposta (lascia vuoto per omettere):", [""] + risp, key=f"es{j}")
 
-        risposte = [domanda["Risposta A"], domanda["Risposta B"], domanda["Risposta C"]]
-        random.shuffle(risposte)
-
-        scelta = st.radio("Seleziona la risposta (o lascia vuoto per saltare):", 
-                          options=[""] + risposte, key=f"esame_q{indice}")
-
-        if st.button("Conferma risposta"):
-            corretta = domanda["Corretta"].strip()
-            risposta_corretta = domanda[f"Risposta {corretta}"].strip()
-
+        if st.button("Conferma risposta", key=f"btn{j}"):
+            corretta = str(q.get("Corretta", "")).strip().upper()
+            chiave = f"Risposta {corretta}"
+            if chiave not in q:
+                st.error(f"Errore interno: '{chiave}' non presente.")
+                st.stop()
+            corretta_text = str(q[chiave]).strip()
             if scelta == "":
-                # risposta omessa
-                punteggio = 0
-            elif scelta == risposta_corretta:
-                punteggio = 0.75
-            else:
-                punteggio = -0.25
-
-            st.session_state.esame_punteggio += punteggio
-            st.session_state.esame_risposte[indice] = punteggio
-
-            if punteggio == 0.75:
+                pun = 0
+                st.info("⚠️ Domanda omessa.")
+            elif scelta == corretta_text:
+                pun = 0.75
                 st.success("✅ Risposta corretta!")
-            elif punteggio == -0.25:
-                st.error(f"❌ Risposta errata. La risposta corretta è: {risposta_corretta}")
             else:
-                st.info("⚠️ Risposta omessa.")
-
+                pun = -0.25
+                st.error(f"❌ Errata. Risposta corretta: {corretta_text}")
+            st.session_state.esame_punteggio += pun
             st.session_state.esame_indice += 1
             st.rerun()
     else:
+        tot = len(domande)
         punteggio = st.session_state.esame_punteggio
-        st.write("**Esame completato!**")
-        st.write(f"Punteggio finale: {punteggio:.2f} su {len(st.session_state.esame_domande) * 0.75}")
-        # Opzionale: visualizza statistiche dettagliate
+        st.write(f"Punteggio finale: **{punteggio:.2f}** su **{tot * 0.75:.2f}**")
+        st.write(f"Percentuale: **{(punteggio / (tot * 0.75) * 100):.1f}%**")
 
-# Main
+# --- Main ---
 def main():
     login()
     if st.session_state.get("logged_in", False):
-        modalita = st.session_state.get("modalita", "Esercizi")
-        if modalita == "Esercizi":
+        m = st.session_state.get("modalita", "Esercizi")
+        if m == "Esercizi":
             esercizi()
-        elif modalita == "Simulazione Esame":
+        else:
             simulazione_esame()
 
 if __name__ == "__main__":
