@@ -61,6 +61,20 @@ def login():
                 st.error("Username o password errati.")
     else:
         st.sidebar.write(f"Benvenuto, {st.session_state.username}!")
+        
+        # --- COUNTER NEL SIDEBAR ---
+        utenti = carica_utenti()
+        username = st.session_state.username
+        if username in utenti:
+            domande_conosciute_utente = set(utenti[username].get('domande_conosciute_ids', []))
+            full_quiz = carica_quiz()
+            # Calcola le domande non conosciute basandosi sul quiz completo
+            domande_non_conosciute_count = len(full_quiz) - len(domande_conosciute_utente)
+
+            st.sidebar.success(f"Domande conosciute: **{len(domande_conosciute_utente)}**")
+            st.sidebar.warning(f"Domande non conosciute: **{domande_non_conosciute_count}**")
+        st.sidebar.markdown("---") # Linea di separazione
+
         current_modalita = st.session_state.get("modalita", "Esercizi")
         new_modalita = st.sidebar.radio("Scegli la modalità", ("Esercizi", "Simulazione Esame"), index=0 if current_modalita == "Esercizi" else 1)
 
@@ -78,7 +92,7 @@ def login():
             else: # Simulazione Esame
                 # Resetta gli stati degli esercizi
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
-                            "risposta_confermata", "domande_errate_ids", "domande_conosciute_ids"]: # Aggiunto qui per pulire la sessione
+                            "risposta_confermata", "domande_errate_ids", "domande_conosciute_ids"]:
                     st.session_state.pop(key, None)
                 for key in list(st.session_state.keys()):
                     if key.startswith("scelta_q"):
@@ -142,37 +156,29 @@ def esercizi():
     utenti = carica_utenti()
     username = st.session_state.username
     
-    # Assicurati che l'utente esista e che abbia la lista delle domande conosciute
     if username not in utenti:
         utenti[username] = {}
     if 'domande_conosciute_ids' not in utenti[username]:
         utenti[username]['domande_conosciute_ids'] = []
     
-    # Carica le domande conosciute per l'utente corrente come un set per lookup veloci
     domande_conosciute_utente = set(utenti[username]['domande_conosciute_ids'])
     
-    # Counter delle domande conosciute
-    st.info(f"Domande conosciute: **{len(domande_conosciute_utente)}**")
-
-    if "quiz" not in st.session_state or len(st.session_state.quiz) == 0: # Aggiunto controllo len(quiz) == 0
+    if "quiz" not in st.session_state or not st.session_state.quiz: # Modificato controllo a `not st.session_state.quiz` che è più robusto
         full_quiz = carica_quiz()
-        # Filtra le domande: escludi quelle già conosciute
         quiz_filtrato = [q for q in full_quiz if q.get('ID') not in domande_conosciute_utente]
         
         if not quiz_filtrato:
             st.warning("Hai segnato tutte le domande come 'conosciute' o non ci sono domande disponibili. Premi 'Ricomincia Esercizi' per ripartire da tutte le domande.")
-            st.session_state.quiz = [] # Imposta un quiz vuoto per segnalare che non ci sono più domande
+            st.session_state.quiz = []
             st.session_state.indice = 0
             st.session_state.risposte_date = {}
             st.session_state.ordine_risposte = {}
             st.session_state.risposta_confermata = False
             st.session_state.domande_errate_ids = []
             
-            # Pulsante per ricominciare includendo tutte le domande (anche le conosciute)
-            if st.button("Ricomincia Esercizi (includi tutte le domande)", key="ricomincia_all_domande"):
-                utenti[username]['domande_conosciute_ids'] = [] # Pulisce le domande conosciute nel JSON
+            if st.button("Ricomincia Esercizi (includi tutte le domande)", key="ricomincia_all_domande_main"): # Chiave unica
+                utenti[username]['domande_conosciute_ids'] = []
                 salva_utenti(utenti)
-                # Resetta tutti gli stati per ricominciare gli esercizi
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
                              "risposta_confermata", "domande_errate_ids"]:
                     st.session_state.pop(key, None)
@@ -180,7 +186,7 @@ def esercizi():
                     if key.startswith("scelta_q"):
                         st.session_state.pop(key)
                 st.rerun()
-            return # Termina la funzione qui se non ci sono domande da mostrare
+            return
         
         random.shuffle(quiz_filtrato)
         st.session_state.quiz = quiz_filtrato
@@ -193,8 +199,6 @@ def esercizi():
     quiz = st.session_state.quiz
     i = st.session_state.indice
 
-    # Questo blocco else è importante: se il quiz è vuoto (perché tutte le domande sono conosciute)
-    # il codice non deve tentare di accedere a quiz[i].
     if i < len(quiz):
         q = quiz[i]
         st.write(f"**Domanda {i+1}/{len(quiz)}:** {q['Domanda']}")
@@ -218,11 +222,11 @@ def esercizi():
                           disabled=st.session_state.risposta_confermata)
         st.session_state[f"scelta_q{i}"] = scelta
 
-        col1, col2 = st.columns(2) # Usa colonne per allineare i pulsanti
+        col1, col2 = st.columns(2)
 
         with col1:
             if not st.session_state.risposta_confermata:
-                if st.button("Conferma risposta"):
+                if st.button("Conferma risposta", key=f"conferma_btn_{i}"): # Chiave unica
                     corretta_lettera = str(q.get("Corretta", "")).strip().upper()
                     chiave_risposta_corretta = f"Risposta {corretta_lettera}"
                     
@@ -255,7 +259,7 @@ def esercizi():
                 else:
                     st.error(f"❌ Sbagliata. La risposta corretta era: **{corretta_text}**")
 
-                if st.button("Prossima domanda"):
+                if st.button("Prossima domanda", key=f"prossima_btn_{i}"): # Chiave unica
                     st.session_state.indice += 1
                     st.session_state.risposta_confermata = False
                     st.session_state.pop(f"scelta_q{i}", None)
@@ -264,7 +268,7 @@ def esercizi():
         with col2:
             # Pulsante "La Conosco" - visibile solo se la domanda corrente non è già segnata come conosciuta
             if q.get('ID') and q['ID'] not in domande_conosciute_utente:
-                if st.button("La Conosco"):
+                if st.button("La Conosco", key=f"conosco_btn_{q['ID']}"): # Chiave basata sull'ID domanda
                     # Aggiungi l'ID della domanda corrente alla lista delle domande conosciute dell'utente
                     utenti[username]['domande_conosciute_ids'].append(q['ID'])
                     salva_utenti(utenti)
@@ -274,22 +278,21 @@ def esercizi():
                     st.session_state.risposta_confermata = False
                     st.session_state.pop(f"scelta_q{i}", None)
                     st.rerun()
-            elif q.get('ID'): # La domanda ha un ID ma è già conosciuta
+            elif q.get('ID'):
                  st.markdown("Questa domanda è già segnata come conosciuta. ✅")
-            else: # La domanda non ha un ID valido
+            else:
                 st.warning("Impossibile segnare come conosciuta: ID domanda mancante.")
 
 
     else: # Fine degli esercizi disponibili
         corrette = sum(st.session_state.risposte_date.values())
-        totale_domande = len(quiz) # Qui si riferisce al numero di domande filtrate
+        totale_domande = len(quiz)
         st.write("---")
         st.write(f"🎉 Hai completato tutti gli esercizi disponibili!")
         st.write(f"Risposte corrette: **{corrette}** su **{totale_domande}** domande.")
         if totale_domande > 0:
             st.write(f"Percentuale di risposte corrette: **{(corrette / totale_domande * 100):.1f}%**")
         
-        # Salvataggio delle domande errate nel profilo utente
         utenti = carica_utenti()
         username = st.session_state.username
 
@@ -305,7 +308,7 @@ def esercizi():
 
         col_ricomincia_1, col_ricomincia_2 = st.columns(2)
         with col_ricomincia_1:
-            if st.button("Ricomincia Esercizi (escludi le conosciute)"):
+            if st.button("Ricomincia Esercizi (escludi le conosciute)", key="ricomincia_escludi"): # Chiave unica
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
                              "risposta_confermata", "domande_errate_ids"]:
                     st.session_state.pop(key, None)
@@ -315,7 +318,7 @@ def esercizi():
                 st.rerun()
         
         with col_ricomincia_2:
-            if st.button("Ricomincia Esercizi (includi tutte le domande)"):
+            if st.button("Ricomincia Esercizi (includi tutte le domande)", key="ricomincia_includi_all"): # Chiave unica
                 utenti[username]['domande_conosciute_ids'] = []
                 salva_utenti(utenti)
                 for key in ["quiz", "indice", "risposte_date", "ordine_risposte",
@@ -327,7 +330,7 @@ def esercizi():
                 st.rerun()
 
 
-# --- Modalità Simulazione Esame (INVARIATA) ---
+# --- Modalità Simulazione Esame ---
 def simulazione_esame():
     st.header("Simulazione Esame")
 
