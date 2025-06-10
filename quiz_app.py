@@ -7,7 +7,7 @@ import datetime
 UTENTI_FILE = "utenti.json"
 QUIZ_FILE = "quiz.xlsx"
 
-# --- INIZIALIZZAZIONE GLOBALE E ULTRA-PRECOSE DI session_state ---
+# --- INIZIALIZZAZIONE GLOBALE E ULTRA-PRECOCE DI session_state ---
 # Questo blocco viene eseguito ad ogni re-run e assicura che queste chiavi esistano sempre.
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
@@ -85,37 +85,40 @@ def login():
                 corrette_sessione = sum(1 for status in st.session_state.risposte_date.values() if status is True)
                 sbagliate_sessione = sum(1 for status in st.session_state.risposte_date.values() if status is False)
                 st.sidebar.success(f"Risposte corrette: **{corrette_sessione}**")
-                st.sidebar.error(f"Risposte sbagliate: **{sbagliate_sessione}**") # Ora in rosso con lo stesso stile
+                st.sidebar.error(f"Risposte sbagliate: **{sbagliate_sessione}**")
+            elif st.session_state.modalita == "Ripasso Domande Sbagliate":
+                # Contatori specifici per il ripasso delle sbagliate
+                domande_errate_utente = set(utenti[username].get('domande_errate_ids', []))
+                # La lista delle risposte date si riferisce solo a questa sessione, non al totale storico
+                # Qui potremmo mostrare quante ne mancano da ripassare
+                st.sidebar.error(f"Domande da ripassare: **{len(domande_errate_utente)}**")
+                st.sidebar.info(f"Domande ripassate (sessione): **{len(st.session_state.risposte_date)}**")
+
             
         st.sidebar.markdown("---") # Linea di separazione
 
         current_modalita = st.session_state.modalita
-        new_modalita = st.sidebar.radio("Scegli la modalità", ("Esercizi", "Simulazione Esame"), 
-                                        index=0 if current_modalita == "Esercizi" else 1, key="modalita_radio")
+        new_modalita = st.sidebar.radio("Scegli la modalità", ("Esercizi", "Ripasso Domande Sbagliate", "Simulazione Esame"), 
+                                        index=["Esercizi", "Ripasso Domande Sbagliate", "Simulazione Esame"].index(current_modalita), key="modalita_radio")
 
         if current_modalita != new_modalita:
             st.session_state.modalita = new_modalita
             # Reset dello stato specifico della modalità quando si cambia
-            if new_modalita == "Esercizi":
-                # Resetta gli stati della simulazione esame
-                for key in ["esame_domande", "esame_indice", "esame_punteggio",
-                            "esame_ordine_risposte", "esame_risposte_dettaglio",
-                            "esame_domande_errate_ids", "esame_confermato", "simulazione_gia_salvata"]:
-                    st.session_state.pop(key, None)
-                st.session_state.risposte_date = {} 
-                for key in list(st.session_state.keys()):
-                    if key.startswith("es_scelta_q"):
-                        st.session_state.pop(key)
-            else: # Simulazione Esame
-                # Resetta gli stati degli esercizi, inclusi quelli per la persistenza della sequenza
-                for key in ["quiz", "indice", "ordine_risposte",
-                            "risposta_confermata", "domande_errate_ids", "domande_conosciute_ids",
-                            "ultimo_indice_esercizi", "sequenza_esercizi_corrente"]: 
-                    st.session_state.pop(key, None)
-                st.session_state.risposte_date = {} 
-                for key in list(st.session_state.keys()):
-                    if key.startswith("scelta_q"):
-                        st.session_state.pop(key)
+            # Resetta tutti gli stati specifici delle modalità precedenti
+            for key in ["quiz", "indice", "ordine_risposte", "risposta_confermata", 
+                        "domande_errate_ids", "domande_conosciute_ids", "ultimo_indice_esercizi", 
+                        "sequenza_esercizi_corrente", "esame_domande", "esame_indice", 
+                        "esame_punteggio", "esame_ordine_risposte", "esame_risposte_dettaglio",
+                        "esame_domande_errate_ids", "esame_confermato", "simulazione_gia_salvata"]:
+                st.session_state.pop(key, None)
+            
+            # Resetta le risposte date solo se si cambia da una modalità all'altra
+            st.session_state.risposte_date = {} 
+            
+            # Resetta tutti i widget radio button dinamici (es. scelta_qX, es_scelta_qX)
+            for key in list(st.session_state.keys()):
+                if key.startswith("scelta_q") or key.startswith("es_scelta_q"):
+                    st.session_state.pop(key)
             st.rerun()
 
         visualizza_storico_simulazioni()
@@ -188,10 +191,8 @@ def visualizza_storico_simulazioni():
                         st.write(f" - **Punti assegnati:** {risposta_dettaglio.get('punteggio_assegnato', 0.0):.2f}")
                         st.markdown("---")
 
-# --- Modalità Esercizi ---
+# --- Modalità Esercizi (Include Ripasso Domande Sbagliate) ---
 def esercizi():
-    st.header("Modalità Esercizi")
-
     utenti = carica_utenti()
     username = st.session_state.username
     
@@ -199,17 +200,44 @@ def esercizi():
         utenti[username] = {}
     if 'domande_conosciute_ids' not in utenti[username]:
         utenti[username]['domande_conosciute_ids'] = []
-    
-    domande_conosciute_utente = set(utenti[username]['domande_conosciute_ids'])
-    
-    # Inizializzazione del quiz per la sessione o ripristino dalla persistenza
-    if "quiz" not in st.session_state or not st.session_state.quiz:
-        full_quiz_map = {q['ID']: q for q in carica_quiz()} # Mappa ID -> Domanda
+    if 'domande_errate_ids' not in utenti[username]:
+        utenti[username]['domande_errate_ids'] = []
+    if 'domande_errate_esame_ids' not in utenti[username]: # Assicurati che esista anche questo
+        utenti[username]['domande_errate_esame_ids'] = []
+
+    full_quiz_map = {q['ID']: q for q in carica_quiz()}
+
+    # Determinazione del set di domande in base alla modalità
+    if st.session_state.modalita == "Ripasso Domande Sbagliate":
+        st.header("Modalità: Ripasso Domande Sbagliate")
         
-        # Carica la sequenza salvata, se esiste e non è vuota
-        sequenza_salvata = utenti[username].get('sequenza_esercizi_corrente', [])
+        # Unisci gli ID delle domande sbagliate dagli esercizi e dalle simulazioni d'esame
+        # Usa un set per eliminare i duplicati
+        domande_sbagliate_unificate_ids = set(utenti[username]['domande_errate_ids'] + 
+                                              utenti[username]['domande_errate_esame_ids'])
         
-        # Filtra le domande conosciute dal quiz completo
+        domande_da_ripassare = [full_quiz_map[q_id] for q_id in domande_sbagliate_unificate_ids if q_id in full_quiz_map]
+        
+        if not domande_da_ripassare:
+            st.info("Non ci sono domande sbagliate da ripassare. Ottimo lavoro!")
+            if st.button("Torna alla Modalità Esercizi", key="return_to_exercises_from_recap"):
+                st.session_state.modalita = "Esercizi"
+                st.rerun()
+            return
+            
+        if "quiz" not in st.session_state or not st.session_state.quiz or st.session_state.get('last_mode_loaded') != "Ripasso Domande Sbagliate":
+            random.shuffle(domande_da_ripassare)
+            st.session_state.quiz = domande_da_ripassare
+            st.session_state.indice = 0
+            st.session_state.risposte_date = {}
+            st.session_state.ordine_risposte = {}
+            st.session_state.risposta_confermata = False
+            st.session_state.last_mode_loaded = "Ripasso Domande Sbagliate" # Traccia l'ultima modalità caricata
+            st.rerun() # Rerun per assicurare il reset della UI
+
+    else: # Modalità "Esercizi"
+        st.header("Modalità Esercizi")
+        domande_conosciute_utente = set(utenti[username]['domande_conosciute_ids'])
         domande_non_conosciute = [q for q in full_quiz_map.values() if q.get('ID') not in domande_conosciute_utente]
 
         if not domande_non_conosciute:
@@ -236,36 +264,39 @@ def esercizi():
                 st.rerun()
             return
 
-        # Costruisci il quiz della sessione
-        quiz_della_sessione = []
-        if sequenza_salvata:
-            # Tenta di ricostruire la sequenza usando gli ID salvati
-            for q_id in sequenza_salvata:
-                if q_id in full_quiz_map and q_id not in domande_conosciute_utente:
-                    quiz_della_sessione.append(full_quiz_map[q_id])
+        if "quiz" not in st.session_state or not st.session_state.quiz or st.session_state.get('last_mode_loaded') != "Esercizi":
+            sequenza_salvata = utenti[username].get('sequenza_esercizi_corrente', [])
             
-            if not quiz_della_sessione or len(quiz_della_sessione) < len(domande_non_conosciute):
-                st.info("La sequenza salvata è stata aggiornata per riflettere le domande 'conosciute' o nuove domande.")
+            quiz_della_sessione = []
+            if sequenza_salvata:
+                for q_id in sequenza_salvata:
+                    if q_id in full_quiz_map and q_id not in domande_conosciute_utente:
+                        quiz_della_sessione.append(full_quiz_map[q_id])
+                
+                if not quiz_della_sessione or len(quiz_della_sessione) < len(domande_non_conosciute):
+                    st.info("La sequenza salvata è stata aggiornata per riflettere le domande 'conosciute' o nuove domande.")
+                    random.shuffle(domande_non_conosciute)
+                    quiz_della_sessione = domande_non_conosciute
+                    utenti[username]['sequenza_esercizi_corrente'] = [q['ID'] for q in quiz_della_sessione]
+                    salva_utenti(utenti)
+            else:
                 random.shuffle(domande_non_conosciute)
                 quiz_della_sessione = domande_non_conosciute
                 utenti[username]['sequenza_esercizi_corrente'] = [q['ID'] for q in quiz_della_sessione]
                 salva_utenti(utenti)
-        else:
-            random.shuffle(domande_non_conosciute)
-            quiz_della_sessione = domande_non_conosciute
-            utenti[username]['sequenza_esercizi_corrente'] = [q['ID'] for q in quiz_della_sessione]
-            salva_utenti(utenti)
 
-        st.session_state.quiz = quiz_della_sessione
-        
-        ultimo_indice_salvato = utenti[username].get('ultimo_indice_esercizi', 0)
-        st.session_state.indice = min(ultimo_indice_salvato, len(quiz_della_sessione) - 1) if quiz_della_sessione else 0
-        
-        st.session_state.risposte_date = {} 
+            st.session_state.quiz = quiz_della_sessione
+            
+            ultimo_indice_salvato = utenti[username].get('ultimo_indice_esercizi', 0)
+            st.session_state.indice = min(ultimo_indice_salvato, len(quiz_della_sessione) - 1) if quiz_della_sessione else 0
+            
+            st.session_state.risposte_date = {} 
+            st.session_state.ordine_risposte = {}
+            st.session_state.risposta_confermata = False
+            st.session_state.domande_errate_ids = []
+            st.session_state.last_mode_loaded = "Esercizi" # Traccia l'ultima modalità caricata
+            st.rerun() # Rerun per assicurare il reset della UI
 
-        st.session_state.ordine_risposte = {}
-        st.session_state.risposta_confermata = False
-        st.session_state.domande_errate_ids = []
 
     quiz = st.session_state.quiz
     i = st.session_state.indice
@@ -287,13 +318,14 @@ def esercizi():
         risp_ordinate = st.session_state.ordine_risposte[i]
 
         current_scelta = st.session_state.get(f"scelta_q{i}", None)
+        # Assicurati che l'indice pre-selezionato sia valido
         index_selezionato = risp_ordinate.index(current_scelta) if current_scelta in risp_ordinate else 0
         
         scelta = st.radio("Seleziona la risposta:", risp_ordinate, key=f"q{i}", index=index_selezionato,
                           disabled=st.session_state.risposta_confermata)
         st.session_state[f"scelta_q{i}"] = scelta
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3) # Aggiungi una colonna per il nuovo pulsante
 
         with col1:
             if not st.session_state.risposta_confermata:
@@ -307,14 +339,23 @@ def esercizi():
 
                     corretta_text = str(q[chiave_risposta_corretta]).strip()
 
-                    st.session_state.risposte_date[i] = (scelta == corretta_text)
+                    risposta_esatta = (scelta == corretta_text)
+                    st.session_state.risposte_date[i] = risposta_esatta
 
-                    if scelta == corretta_text:
+                    if risposta_esatta:
                         st.success("✅ Risposta corretta!")
+                        # In modalità esercizi, se è corretta e non è una domanda sbagliata pre-esistente, la segniamo come conosciuta.
+                        # In modalità ripasso, anche se corretta, la lasciamo nel set delle sbagliate a meno di click sul pulsante "Corretta"
+                        if st.session_state.modalita == "Esercizi" and q.get('ID') not in set(utenti[username]['domande_errate_ids']):
+                            if q.get('ID') not in set(utenti[username]['domande_conosciute_ids']):
+                                utenti[username]['domande_conosciute_ids'].append(q['ID'])
+                                salva_utenti(utenti)
                     else:
                         st.error(f"❌ Sbagliata. La risposta corretta era: **{corretta_text}**")
                         if 'ID' in q:
-                            st.session_state.domande_errate_ids.append(q['ID'])
+                            if q['ID'] not in set(utenti[username]['domande_errate_ids']):
+                                utenti[username]['domande_errate_ids'].append(q['ID'])
+                                salva_utenti(utenti)
                         else:
                             st.warning(f"Attenzione: Domanda {i+1} sbagliata ma senza ID per il salvataggio nel profilo.")
 
@@ -332,83 +373,114 @@ def esercizi():
 
                 if st.button("Prossima domanda", key=f"prossima_btn_{i}"):
                     st.session_state.indice += 1
-                    utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
-                    salva_utenti(utenti)
+                    # Aggiorna l'indice salvato solo per la modalità Esercizi normale
+                    if st.session_state.modalita == "Esercizi":
+                        utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
+                        salva_utenti(utenti)
                     
                     st.session_state.risposta_confermata = False
                     st.session_state.pop(f"scelta_q{i}", None)
                     st.rerun()
         
         with col2:
-            if q.get('ID') and q['ID'] not in domande_conosciute_utente:
-                if st.button("La Conosco", key=f"conosco_btn_{q['ID']}"):
-                    utenti[username]['domande_conosciute_ids'].append(q['ID'])
-                    st.session_state.indice += 1 
-                    utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
-                    utenti[username]['sequenza_esercizi_corrente'] = [] 
+            if st.session_state.modalita == "Esercizi":
+                # Logica per il pulsante "La Conosco" solo in modalità Esercizi
+                if q.get('ID') and q['ID'] not in set(utenti[username]['domande_conosciute_ids']):
+                    if st.button("La Conosco", key=f"conosco_btn_{q['ID']}"):
+                        utenti[username]['domande_conosciute_ids'].append(q['ID'])
+                        st.session_state.indice += 1 
+                        utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
+                        utenti[username]['sequenza_esercizi_corrente'] = [] # Reset sequenza se si marca come conosciuta
+                        salva_utenti(utenti)
+                        st.success(f"Domanda '{q.get('Domanda', 'N/D')}' segnata come conosciuta!")
+                        st.session_state.risposta_confermata = False
+                        st.session_state.pop(f"scelta_q{i}", None)
+                        st.rerun() 
+                elif q.get('ID'):
+                    st.markdown("Questa domanda è già segnata come conosciuta. ✅")
+                else:
+                    st.warning("Impossibile segnare come conosciuta: ID domanda mancante.")
+            elif st.session_state.modalita == "Ripasso Domande Sbagliate" and st.session_state.risposta_confermata:
+                # Pulsante "Corretta" visibile solo in modalità Ripasso e dopo aver risposto
+                if st.button("Corretta", key=f"mark_correct_{q['ID']}"):
+                    if q.get('ID') in utenti[username]['domande_errate_ids']:
+                        utenti[username]['domande_errate_ids'].remove(q['ID'])
+                    if q.get('ID') in utenti[username]['domande_errate_esame_ids']:
+                        utenti[username]['domande_errate_esame_ids'].remove(q['ID'])
                     salva_utenti(utenti)
-                    st.success(f"Domanda '{q.get('Domanda', 'N/D')}' segnata come conosciuta!")
+                    st.success("Domanda rimossa dal set delle 'sbagliate'!")
+                    st.session_state.indice += 1
                     st.session_state.risposta_confermata = False
                     st.session_state.pop(f"scelta_q{i}", None)
-                    st.rerun() 
-            elif q.get('ID'):
-                 st.markdown("Questa domanda è già segnata come conosciuta. ✅")
-            else:
-                st.warning("Impossibile segnare come conosciuta: ID domanda mancante.")
-
+                    st.rerun()
 
     else: # Fine degli esercizi disponibili
-        corrette = sum(st.session_state.risposte_date.values())
-        totale_domande = len(quiz)
         st.write("---")
-        st.write(f"🎉 Hai completato tutti gli esercizi disponibili!")
-        st.write(f"Risposte corrette: **{corrette}** su **{totale_domande}** domande.")
-        if totale_domande > 0:
-            st.write(f"Percentuale di risposte corrette: **{(corrette / totale_domande * 100):.1f}%**")
+        st.write(f"🎉 Hai completato tutte le domande disponibili in questa modalità!")
         
-        utenti = carica_utenti()
-        username = st.session_state.username
+        if st.session_state.modalita == "Esercizi":
+            corrette = sum(st.session_state.risposte_date.values())
+            totale_domande = len(quiz)
+            st.write(f"Risposte corrette: **{corrette}** su **{totale_domande}** domande.")
+            if totale_domande > 0:
+                st.write(f"Percentuale di risposte corrette: **{(corrette / totale_domande * 100):.1f}%**")
+            
+            # Aggiorna le domande errate solo se non sono già state aggiornate nella sessione corrente
+            utenti = carica_utenti() # Ricarica per avere dati freschi
+            username = st.session_state.username
+            current_errate_ids = set(utenti[username].get('domande_errate_ids', []))
+            current_errate_ids.update(st.session_state.domande_errate_ids) # Aggiungi quelle errate in questa sessione
+            utenti[username]['domande_errate_ids'] = list(current_errate_ids)
+            
+            utenti[username]['ultimo_indice_esercizi'] = 0 
+            utenti[username]['sequenza_esercizi_corrente'] = []
+            salva_utenti(utenti)
+            st.info(f"Le tue domande errate sono state salvate nel tuo profilo.")
 
-        if username not in utenti:
-            utenti[username] = {}
+            col_ricomincia_1, col_ricomincia_2 = st.columns(2)
+            with col_ricomincia_1:
+                if st.button("Ricomincia Esercizi (escludi le conosciute)", key="ricomincia_escludi"):
+                    utenti[username]['ultimo_indice_esercizi'] = 0
+                    utenti[username]['sequenza_esercizi_corrente'] = [] 
+                    salva_utenti(utenti)
+                    for key in ["quiz", "indice", "ordine_risposte",
+                                 "risposta_confermata", "domande_errate_ids"]:
+                        st.session_state.pop(key, None)
+                    st.session_state.risposte_date = {} 
+                    for key in list(st.session_state.keys()):
+                        if key.startswith("scelta_q"):
+                            st.session_state.pop(key)
+                    st.rerun()
+            
+            with col_ricomincia_2:
+                if st.button("Ricomincia Esercizi (includi tutte le domande)", key="ricomincia_includi_all"):
+                    utenti[username]['domande_conosciute_ids'] = []
+                    utenti[username]['ultimo_indice_esercizi'] = 0
+                    utenti[username]['sequenza_esercizi_corrente'] = [] 
+                    salva_utenti(utenti)
+                    for key in ["quiz", "indice", "ordine_risposte",
+                                 "risposta_confermata", "domande_errate_ids"]:
+                        st.session_state.pop(key, None)
+                    st.session_state.risposte_date = {} 
+                    for key in list(st.session_state.keys()):
+                        if key.startswith("scelta_q"):
+                            st.session_state.pop(key)
+                    st.rerun()
 
-        current_errate_ids = set(utenti[username].get('domande_errate_ids', []))
-        current_errate_ids.update(st.session_state.domande_errate_ids)
-        utenti[username]['domande_errate_ids'] = list(current_errate_ids)
-        
-        utenti[username]['ultimo_indice_esercizi'] = 0 
-        utenti[username]['sequenza_esercizi_corrente'] = []
-        salva_utenti(utenti)
-        st.info(f"Le tue domande errate sono state salvate nel tuo profilo.")
-
-        col_ricomincia_1, col_ricomincia_2 = st.columns(2)
-        with col_ricomincia_1:
-            if st.button("Ricomincia Esercizi (escludi le conosciute)", key="ricomincia_escludi"):
-                utenti[username]['ultimo_indice_esercizi'] = 0
-                utenti[username]['sequenza_esercizi_corrente'] = [] 
-                salva_utenti(utenti)
-                for key in ["quiz", "indice", "ordine_risposte",
-                             "risposta_confermata", "domande_errate_ids"]:
+        elif st.session_state.modalita == "Ripasso Domande Sbagliate":
+            st.info("Hai ripassato tutte le domande sbagliate disponibili per questa sessione.")
+            # Non mostriamo un punteggio qui, dato che l'obiettivo è il ripasso e la rimozione
+            if st.button("Ricomincia Ripasso", key="ricomincia_ripasso"):
+                for key in ["quiz", "indice", "ordine_risposte", "risposta_confermata"]:
                     st.session_state.pop(key, None)
-                st.session_state.risposte_date = {} 
+                st.session_state.risposte_date = {}
                 for key in list(st.session_state.keys()):
                     if key.startswith("scelta_q"):
                         st.session_state.pop(key)
+                st.session_state.last_mode_loaded = None # Forza il ricaricamento delle domande
                 st.rerun()
-        
-        with col_ricomincia_2:
-            if st.button("Ricomincia Esercizi (includi tutte le domande)", key="ricomincia_includi_all"):
-                utenti[username]['domande_conosciute_ids'] = []
-                utenti[username]['ultimo_indice_esercizi'] = 0
-                utenti[username]['sequenza_esercizi_corrente'] = [] 
-                salva_utenti(utenti)
-                for key in ["quiz", "indice", "ordine_risposte",
-                             "risposta_confermata", "domande_errate_ids"]:
-                    st.session_state.pop(key, None)
-                st.session_state.risposte_date = {} 
-                for key in list(st.session_state.keys()):
-                    if key.startswith("scelta_q"):
-                        st.session_state.pop(key)
+            if st.button("Torna alla Modalità Esercizi", key="back_to_normal_exercises"):
+                st.session_state.modalita = "Esercizi"
                 st.rerun()
 
 
@@ -424,7 +496,7 @@ def simulazione_esame():
         st.session_state.esame_punteggio = 0.0
         st.session_state.esame_ordine_risposte = {}
         st.session_state.esame_risposte_dettaglio = []
-        st.session_state.esame_domande_errate_ids = []
+        st.session_state.esame_domande_errate_ids = [] # Domande errate in QUESTA simulazione
         st.session_state.esame_confermato = False
         st.session_state.simulazione_gia_salvata = False
         
@@ -448,7 +520,7 @@ def simulazione_esame():
         risp_ordinate = st.session_state.esame_ordine_risposte[j]
 
         current_es_scelta = st.session_state.get(f"es_scelta_q{j}", None)
-        opzioni_radio_esame = [""] + risp_ordinate
+        opzioni_radio_esame = [""] + risp_ordinate # Aggiunge opzione per lasciare vuoto
         
         index_selezionato_esame = 0
         if current_es_scelta in opzioni_radio_esame:
@@ -547,6 +619,8 @@ def simulazione_esame():
                 utenti[username] = {}
             if 'storico_simulazioni' not in utenti[username]:
                 utenti[username]['storico_simulazioni'] = []
+            if 'domande_errate_esame_ids' not in utenti[username]: # Assicurati che esista
+                utenti[username]['domande_errate_esame_ids'] = []
 
             simulazione_record = {
                 'data': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
@@ -567,6 +641,7 @@ def simulazione_esame():
                 utenti[username]['storico_simulazioni'] = utenti[username]['storico_simulazioni'][-5:]
             # --- FINE LOGICA PER MANTENERE SOLO LE ULTIME 5 SIMULAZIONI ---
 
+            # Aggiungi le domande errate di questa simulazione al set globale di domande errate dell'esame
             current_errate_ids_esame = set(utenti[username].get('domande_errate_esame_ids', []))
             current_errate_ids_esame.update(st.session_state.esame_domande_errate_ids)
             utenti[username]['domande_errate_esame_ids'] = list(current_errate_ids_esame)
@@ -590,7 +665,7 @@ def simulazione_esame():
 def main():
     login() 
     if st.session_state.get("logged_in", False):
-        if st.session_state.modalita == "Esercizi":
+        if st.session_state.modalita in ["Esercizi", "Ripasso Domande Sbagliate"]:
             esercizi()
         else: # "Simulazione Esame"
             simulazione_esame()
