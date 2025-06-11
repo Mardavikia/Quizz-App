@@ -473,21 +473,36 @@ def esercizi():
                 st.rerun()
 
         with col_nav_3:
+            # Pulsante "Ricomincia da Capo" con richiesta di conferma
             if st.button("↩️ Ricomincia da Capo", key=f"reset_btn_{i}"):
-                # La logica di "Ricomincia da Capo" è ora centralizzata
-                if st.session_state.modalita == "Esercizi":
-                    utenti[username]['ultimo_indice_esercizi'] = 0
-                    utenti[username]['sequenza_esercizi_corrente'] = [] 
-                    salva_utenti(utenti)
-                
-                # Resetta le chiavi di session_state relative al quiz corrente
-                for key in ["quiz", "indice", "ordine_risposte", "risposta_confermata", "last_mode_loaded"]:
-                    st.session_state.pop(key, None)
-                # Resetta i widget radio
-                for key in list(st.session_state.keys()):
-                    if key.startswith("scelta_q"):
-                        st.session_state.pop(key)
+                # Usa una chiave temporanea per la conferma
+                st.session_state.confirm_reset = True 
                 st.rerun()
+
+            if st.session_state.get("confirm_reset", False):
+                st.warning("Sei sicuro di voler ricominciare da capo? Questo ricaricherà le domande.")
+                col_confirm_yes, col_confirm_no = st.columns(2)
+                with col_confirm_yes:
+                    if st.button("Sì, Ricomincia", key="confirm_yes_reset"):
+                        if st.session_state.modalita == "Esercizi":
+                            utenti[username]['ultimo_indice_esercizi'] = 0
+                            utenti[username]['sequenza_esercizi_corrente'] = [] 
+                            salva_utenti(utenti)
+                        
+                        # Resetta le chiavi di session_state relative al quiz corrente
+                        for key in ["quiz", "indice", "ordine_risposte", "risposta_confermata", "last_mode_loaded"]:
+                            st.session_state.pop(key, None)
+                        # Resetta i widget radio
+                        for key in list(st.session_state.keys()):
+                            if key.startswith("scelta_q"):
+                                st.session_state.pop(key)
+                        
+                        st.session_state.confirm_reset = False # Resetta il flag di conferma
+                        st.rerun()
+                with col_confirm_no:
+                    if st.button("No, Annulla", key="confirm_no_reset"):
+                        st.session_state.confirm_reset = False
+                        st.rerun()
 
 
     else: # Fine degli esercizi disponibili
