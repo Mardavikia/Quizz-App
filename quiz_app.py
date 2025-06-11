@@ -329,53 +329,9 @@ def esercizi():
                           disabled=st.session_state.risposta_confermata)
         st.session_state[f"scelta_q{i}"] = scelta
 
-        # --- Pulsanti di Navigazione QUIZ ---
-        col_nav_1, col_nav_2, col_nav_3 = st.columns([1, 1, 2]) # Colonna extra per "Ricomincia"
 
-        with col_nav_1:
-            if st.button("⬅️ Indietro", key=f"prev_btn_{i}", disabled=(st.session_state.indice == 0)):
-                st.session_state.indice -= 1
-                if st.session_state.modalita == "Esercizi": # Salva l'indice solo in modalità esercizi
-                    utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
-                    salva_utenti(utenti)
-                st.session_state.risposta_confermata = False
-                st.session_state.pop(f"scelta_q{i}", None) # Rimuovi la scelta per ricaricare il radio
-                st.rerun()
-
-        with col_nav_2:
-            if st.button("Avanti ➡️", key=f"next_btn_{i}", disabled=(st.session_state.indice >= len(quiz) - 1 and not st.session_state.risposta_confermata)):
-                if not st.session_state.risposta_confermata:
-                    st.warning("Per avanzare, devi prima confermare la tua risposta.")
-                else:
-                    st.session_state.indice += 1
-                    if st.session_state.modalita == "Esercizi": # Salva l'indice solo in modalità esercizi
-                        utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
-                        salva_utenti(utenti)
-                    st.session_state.risposta_confermata = False
-                    st.session_state.pop(f"scelta_q{i}", None)
-                    st.rerun()
-
-        with col_nav_3:
-            if st.button("↩️ Ricomincia da Capo", key=f"reset_btn_{i}"):
-                # La logica di "Ricomincia da Capo" è ora centralizzata
-                # Forziamo il ricaricamento del quiz e reset dello stato
-                if st.session_state.modalita == "Esercizi":
-                    utenti[username]['ultimo_indice_esercizi'] = 0
-                    utenti[username]['sequenza_esercizi_corrente'] = [] 
-                    salva_utenti(utenti)
-                
-                # Resetta le chiavi di session_state relative al quiz corrente
-                for key in ["quiz", "indice", "ordine_risposte", "risposta_confermata", "last_mode_loaded"]:
-                    st.session_state.pop(key, None)
-                # Resetta i widget radio
-                for key in list(st.session_state.keys()):
-                    if key.startswith("scelta_q"):
-                        st.session_state.pop(key)
-                st.rerun()
-
-
-        # --- Feedback e Azioni Principali (Sotto i pulsanti di navigazione) ---
-        col1, col2, col3 = st.columns(3) 
+        # --- Pulsanti di Azione Principali (Prima Fila) ---
+        col1, col2 = st.columns(2) 
 
         with col1:
             if not st.session_state.risposta_confermata:
@@ -413,7 +369,7 @@ def esercizi():
 
                     st.session_state.risposta_confermata = True
                     st.rerun() 
-            else: # Se la risposta è già stata confermata
+            else: # Se la risposta è già stata confermata, mostra "Prossima Domanda"
                 corretta_lettera = str(q.get("Corretta", "")).strip().upper()
                 chiave_risposta_corretta = f"Risposta {corretta_lettera}"
                 corretta_text = str(q[chiave_risposta_corretta]).strip() 
@@ -430,11 +386,17 @@ def esercizi():
                     else:
                         st.error(f"❌ Sbagliata. La risposta corretta era: **{corretta_text}**")
 
-
-                # Il pulsante "Prossima domanda" ora è stato sostituito/integrato da "Avanti"
-                # in caso di conferma, l'utente può semplicemente cliccare "Avanti"
-                # Non c'è più bisogno di un pulsante "Prossima domanda" qui.
-
+                # Pulsante "Prossima Domanda"
+                if st.button("Prossima Domanda", key=f"prossima_btn_{i}"):
+                    st.session_state.indice += 1
+                    if st.session_state.modalita == "Esercizi":
+                        utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
+                        salva_utenti(utenti)
+                    
+                    st.session_state.risposta_confermata = False
+                    st.session_state.pop(f"scelta_q{i}", None)
+                    st.rerun()
+        
         with col2:
             if st.session_state.modalita == "Esercizi":
                 if q.get('ID') and q['ID'] not in set(utenti[username]['domande_conosciute_ids']):
@@ -483,6 +445,50 @@ def esercizi():
                     st.session_state.risposta_confermata = False
                     st.session_state.pop(f"scelta_q{i}", None)
                     st.rerun()
+
+        st.markdown("---") # Linea di separazione tra le due file di pulsanti
+        
+        # --- Pulsanti di Navigazione (Seconda Fila) ---
+        col_nav_1, col_nav_2, col_nav_3 = st.columns(3) 
+
+        with col_nav_1:
+            if st.button("⬅️ Indietro", key=f"prev_btn_{i}", disabled=(st.session_state.indice == 0)):
+                st.session_state.indice -= 1
+                if st.session_state.modalita == "Esercizi": # Salva l'indice solo in modalità esercizi
+                    utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
+                    salva_utenti(utenti)
+                st.session_state.risposta_confermata = False
+                st.session_state.pop(f"scelta_q{i}", None) # Rimuovi la scelta per ricaricare il radio
+                st.rerun()
+
+        with col_nav_2:
+            # Il pulsante Avanti ora funziona sempre per navigare, non solo dopo conferma
+            if st.button("Avanti ➡️", key=f"next_btn_{i}", disabled=(st.session_state.indice >= len(quiz) - 1)):
+                st.session_state.indice += 1
+                if st.session_state.modalita == "Esercizi": # Salva l'indice solo in modalità esercizi
+                    utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
+                    salva_utenti(utenti)
+                st.session_state.risposta_confermata = False
+                st.session_state.pop(f"scelta_q{i}", None)
+                st.rerun()
+
+        with col_nav_3:
+            if st.button("↩️ Ricomincia da Capo", key=f"reset_btn_{i}"):
+                # La logica di "Ricomincia da Capo" è ora centralizzata
+                if st.session_state.modalita == "Esercizi":
+                    utenti[username]['ultimo_indice_esercizi'] = 0
+                    utenti[username]['sequenza_esercizi_corrente'] = [] 
+                    salva_utenti(utenti)
+                
+                # Resetta le chiavi di session_state relative al quiz corrente
+                for key in ["quiz", "indice", "ordine_risposte", "risposta_confermata", "last_mode_loaded"]:
+                    st.session_state.pop(key, None)
+                # Resetta i widget radio
+                for key in list(st.session_state.keys()):
+                    if key.startswith("scelta_q"):
+                        st.session_state.pop(key)
+                st.rerun()
+
 
     else: # Fine degli esercizi disponibili
         st.write("---")
