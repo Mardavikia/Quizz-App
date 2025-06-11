@@ -72,6 +72,10 @@ def login():
                 # --- Carica i dati persistenti dell'utente nella session_state ---
                 st.session_state.risposte_date = utenti[username].get('risposte_storico_esercizi', {}) # Carica storico risposte
                 st.session_state.modalita = utenti[username].get('modalita_salvata', "Esercizi") # Carica modalità salvata
+                # Inizializza lo storico delle sessioni di esercizi se non esiste
+                if 'storico_sessioni_esercizi' not in utenti[username]:
+                    utenti[username]['storico_sessioni_esercizi'] = []
+                salva_utenti(utenti) # Salva subito per assicurare che la struttura sia aggiornata
                 # --- Fine Caricamento ---
 
                 st.success(f"Benvenuto, {username}!")
@@ -93,12 +97,13 @@ def login():
             st.sidebar.warning(f"Domande non conosciute: **{domande_non_conosciute_count}**")
             
             # Contatori Risposte Corrette e Sbagliate per la sessione corrente di esercizi (CUMULATIVI)
-            risposte_storiche = st.session_state.get('risposte_date', {})
-            corrette_cumulative = sum(1 for status in risposte_storiche.values() if status is True)
-            sbagliate_cumulative = sum(1 for status in risposte_storiche.values() if status is False)
+            # Questi contatori sono per la sessione corrente del quiz, non cumulativi in assoluto
+            # Saranno resettati con "Ricomincia da Capo"
+            corrette_sessione = st.session_state.get('corrette_sessione', 0)
+            sbagliate_sessione = st.session_state.get('sbagliate_sessione', 0)
             
-            st.sidebar.success(f"Risposte corrette (cumulative): **{corrette_cumulative}**")
-            st.sidebar.error(f"Risposte sbagliate (cumulative): **{sbagliate_cumulative}**")
+            st.sidebar.success(f"Risposte corrette (sessione): **{corrette_sessione}**")
+            st.sidebar.error(f"Risposte sbagliate (sessione): **{sbagliate_sessione}**")
             
             # Contatori specifici per il ripasso delle sbagliate se in quella modalità
             if st.session_state.modalita == "Ripasso Domande Sbagliate":
@@ -123,7 +128,7 @@ def login():
                         "esame_ordine_risposte", "esame_risposte_dettaglio",
                         "esame_domande_errate_ids", "esame_confermato", "simulazione_gia_salvata",
                         "last_mode_loaded", 
-                        "ripassate_sessione"]: 
+                        "ripassate_sessione", "corrette_sessione", "sbagliate_sessione"]: # Aggiunto reset contatori
                 st.session_state.pop(key, None)
             
             for key in list(st.session_state.keys()):
@@ -136,11 +141,22 @@ def login():
         # Pulsante per randomizzare nuovamente le domande degli esercizi
         if st.sidebar.button("Randomizza Nuovamente Domande", key="randomize_exercises_btn"):
             if st.session_state.username in utenti:
+                # Salva i contatori attuali prima del reset
+                utenti[username]['storico_sessioni_esercizi'].append({
+                    'data': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'corrette': st.session_state.get('corrette_sessione', 0),
+                    'sbagliate': st.session_state.get('sbagliate_sessione', 0),
+                    'azione': 'Randomizzazione Manuale'
+                })
+                # Mantieni solo le ultime 10 sessioni nello storico
+                utenti[username]['storico_sessioni_esercizi'] = utenti[username]['storico_sessioni_esercizi'][-10:]
+
                 utenti[st.session_state.username]['sequenza_esercizi_corrente'] = []
                 utenti[st.session_state.username]['ultimo_indice_esercizi'] = 0
                 salva_utenti(utenti)
                 for key in ["quiz", "indice", "ordine_risposte",
-                             "risposta_confermata", "domande_errate_ids_session", "last_mode_loaded"]:
+                             "risposta_confermata", "domande_errate_ids_session", "last_mode_loaded",
+                             "corrette_sessione", "sbagliate_sessione"]: # Reset contatori
                     st.session_state.pop(key, None)
                 for key in list(st.session_state.keys()):
                     if key.startswith("scelta_q"):
@@ -197,6 +213,31 @@ def visualizza_storico_simulazioni():
                         st.write(f" - **Punti assegnati:** {risposta_dettaglio.get('punteggio_assegnato', 0.0):.2f}")
                         st.markdown("---")
 
+# Funzione per lo storico dei contatori degli esercizi (nuova)
+def visualizza_storico_esercizi():
+    utenti = carica_utenti()
+    username = st.session_state.username
+    storico_esercizi = utenti.get(username, {}).get('storico_sessioni_esercizi', [])
+
+    st.sidebar.markdown("---")
+    st.sidebar.subheader("Storico Sessioni Esercizi")
+
+    if not storico_esercizi:
+        st.sidebar.info("Nessuna sessione di esercizi completata o riavviata.")
+    else:
+        # Ordina dal più recente al meno recente
+        storico_ordinato = sorted(storico_esercizi, key=lambda x: x.get('data', ''), reverse=True)
+        for i, sessione in enumerate(storico_ordinato):
+            data = sessione.get('data', 'N/D')
+            corrette = sessione.get('corrette', 0)
+            sbagliate = sessione.get('sbagliate', 0)
+            azione = sessione.get('azione', 'Completata')
+
+            with st.sidebar.expander(f"Sessione del {data} ({azione})"):
+                st.write(f"✅ Corrette: **{corrette}**")
+                st.write(f"❌ Sbagliate: **{sbagliate}**")
+                st.write(f"Totale Domande: **{corrette + sbagliate}**")
+
 # --- Modalità Esercizi (Include Ripasso Domande Sbagliate) ---
 def esercizi():
     utenti = carica_utenti()
@@ -210,6 +251,14 @@ def esercizi():
         utenti[username]['domande_errate_ids'] = []
     if 'domande_errate_esame_ids' not in utenti[username]:
         utenti[username]['domande_errate_esame_ids'] = []
+    if 'storico_sessioni_esercizi' not in utenti[username]: # Assicura l'esistenza dello storico
+        utenti[username]['storico_sessioni_esercizi'] = []
+    
+    # Inizializza i contatori della sessione se non esistono
+    if 'corrette_sessione' not in st.session_state:
+        st.session_state.corrette_sessione = 0
+    if 'sbagliate_sessione' not in st.session_state:
+        st.session_state.sbagliate_sessione = 0
 
     full_quiz_map = {q['ID']: q for q in carica_quiz()}
 
@@ -238,6 +287,10 @@ def esercizi():
             st.session_state.risposta_confermata = False
             st.session_state.last_mode_loaded = "Ripasso Domande Sbagliate"
             st.session_state.ripassate_sessione = []
+            
+            # Reset contatori per la nuova sessione di ripasso
+            st.session_state.corrette_sessione = 0
+            st.session_state.sbagliate_sessione = 0
             st.rerun()
 
     else: # Modalità "Esercizi"
@@ -254,6 +307,16 @@ def esercizi():
             st.session_state.domande_errate_ids_session = [] 
             
             if st.button("Ricomincia Esercizi (includi tutte le domande)", key="ricomincia_all_domande_main"):
+                # Salva i contatori attuali prima del reset
+                utenti[username]['storico_sessioni_esercizi'].append({
+                    'data': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    'corrette': st.session_state.get('corrette_sessione', 0),
+                    'sbagliate': st.session_state.get('sbagliate_sessione', 0),
+                    'azione': 'Ricomincia Tutto'
+                })
+                # Mantieni solo le ultime 10 sessioni nello storico
+                utenti[username]['storico_sessioni_esercizi'] = utenti[username]['storico_sessioni_esercizi'][-10:]
+
                 utenti[username]['domande_conosciute_ids'] = []
                 utenti[username]['ultimo_indice_esercizi'] = 0
                 utenti[username]['sequenza_esercizi_corrente'] = [] 
@@ -262,7 +325,8 @@ def esercizi():
                 salva_utenti(utenti) 
 
                 for key in ["quiz", "indice", "ordine_risposte",
-                             "risposta_confermata", "domande_errate_ids_session", "last_mode_loaded"]:
+                             "risposta_confermata", "domande_errate_ids_session", "last_mode_loaded",
+                             "corrette_sessione", "sbagliate_sessione"]: # Reset contatori
                     st.session_state.pop(key, None)
                 for key in list(st.session_state.keys()):
                     if key.startswith("scelta_q"):
@@ -300,6 +364,9 @@ def esercizi():
             st.session_state.risposta_confermata = False
             st.session_state.domande_errate_ids_session = [] 
             st.session_state.last_mode_loaded = "Esercizi"
+            # Inizializza contatori se è una nuova sessione di esercizi
+            st.session_state.corrette_sessione = 0
+            st.session_state.sbagliate_sessione = 0
             st.rerun()
 
 
@@ -353,8 +420,10 @@ def esercizi():
 
                     if risposta_esatta:
                         st.success("✅ Risposta corretta!")
+                        st.session_state.corrette_sessione += 1 # Incrementa contatore
                     else:
                         st.error(f"❌ Sbagliata. La risposta corretta era: **{corretta_text}**")
+                        st.session_state.sbagliate_sessione += 1 # Incrementa contatore
                         if 'ID' in q:
                             if q['ID'] not in set(utenti[username]['domande_errate_ids']):
                                 utenti[username]['domande_errate_ids'].append(q['ID'])
@@ -380,6 +449,7 @@ def esercizi():
                     else:
                         st.error(f"❌ Sbagliata. La risposta corretta era: **{corretta_text}**")
                 elif st.session_state.modalita == "Ripasso Domande Sbagliate":
+                    # In modalità Ripasso, il feedback è solo visivo, i contatori sono aggiornati alla conferma
                     risposta_esatta_nel_ripasso = (scelta == corretta_text)
                     if risposta_esatta_nel_ripasso:
                         st.success("✅ Risposta corretta!")
@@ -411,7 +481,9 @@ def esercizi():
                         if q['ID'] in utenti[username]['domande_errate_esame_ids']:
                             utenti[username]['domande_errate_esame_ids'].remove(q['ID'])
 
+                        # Quando la segno come conosciuta, è implicitamente "corretta" per la sessione corrente
                         st.session_state.risposte_date[q['ID']] = True 
+                        st.session_state.corrette_sessione += 1 # Incrementa contatore
 
                         st.session_state.indice += 1 
                         utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
@@ -434,6 +506,7 @@ def esercizi():
                         utenti[username]['domande_errate_esame_ids'].remove(q['ID'])
                     
                     st.session_state.risposte_date[q['ID']] = True 
+                    st.session_state.corrette_sessione += 1 # Incrementa contatore
                     salva_utenti(utenti)
                     st.success("Domanda rimossa dal set delle 'sbagliate'!")
                     
@@ -473,21 +546,47 @@ def esercizi():
                 st.rerun()
 
         with col_nav_3:
+            # Pulsante "Ricomincia da Capo" con richiesta di conferma
             if st.button("↩️ Ricomincia da Capo", key=f"reset_btn_{i}"):
-                # La logica di "Ricomincia da Capo" è ora centralizzata
-                if st.session_state.modalita == "Esercizi":
-                    utenti[username]['ultimo_indice_esercizi'] = 0
-                    utenti[username]['sequenza_esercizi_corrente'] = [] 
-                    salva_utenti(utenti)
-                
-                # Resetta le chiavi di session_state relative al quiz corrente
-                for key in ["quiz", "indice", "ordine_risposte", "risposta_confermata", "last_mode_loaded"]:
-                    st.session_state.pop(key, None)
-                # Resetta i widget radio
-                for key in list(st.session_state.keys()):
-                    if key.startswith("scelta_q"):
-                        st.session_state.pop(key)
+                # Usa una chiave temporanea per la conferma
+                st.session_state.confirm_reset = True 
                 st.rerun()
+
+            if st.session_state.get("confirm_reset", False):
+                st.warning("Sei sicuro di voler ricominciare da capo? Questo resetterà i contatori di sessione e ricaricherà le domande.")
+                col_confirm_yes, col_confirm_no = st.columns(2)
+                with col_confirm_yes:
+                    if st.button("Sì, Ricomincia", key="confirm_yes_reset"):
+                        # Salva i contatori attuali prima del reset
+                        utenti[username]['storico_sessioni_esercizi'].append({
+                            'data': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            'corrette': st.session_state.get('corrette_sessione', 0),
+                            'sbagliate': st.session_state.get('sbagliate_sessione', 0),
+                            'azione': 'Ricomincia da Capo'
+                        })
+                        # Mantieni solo le ultime 10 sessioni nello storico
+                        utenti[username]['storico_sessioni_esercizi'] = utenti[username]['storico_sessioni_esercizi'][-10:]
+
+                        if st.session_state.modalita == "Esercizi":
+                            utenti[username]['ultimo_indice_esercizi'] = 0
+                            utenti[username]['sequenza_esercizi_corrente'] = [] 
+                            salva_utenti(utenti)
+                        
+                        # Resetta le chiavi di session_state relative al quiz corrente E i contatori di sessione
+                        for key in ["quiz", "indice", "ordine_risposte", "risposta_confermata", 
+                                    "last_mode_loaded", "corrette_sessione", "sbagliate_sessione"]:
+                            st.session_state.pop(key, None)
+                        # Resetta i widget radio
+                        for key in list(st.session_state.keys()):
+                            if key.startswith("scelta_q"):
+                                st.session_state.pop(key)
+                        
+                        st.session_state.confirm_reset = False # Resetta il flag di conferma
+                        st.rerun()
+                with col_confirm_no:
+                    if st.button("No, Annulla", key="confirm_no_reset"):
+                        st.session_state.confirm_reset = False
+                        st.rerun()
 
 
     else: # Fine degli esercizi disponibili
@@ -497,21 +596,24 @@ def esercizi():
         if st.session_state.modalita == "Esercizi":
             quiz_ids_current_session = {q['ID'] for q in quiz}
             
-            corrette_di_sessione = 0
-            sbagliate_di_sessione = 0
-            for q_id in quiz_ids_current_session:
-                if q_id in st.session_state.risposte_date:
-                    if st.session_state.risposte_date[q_id] == True:
-                        corrette_di_sessione += 1
-                    else:
-                        sbagliate_di_sessione += 1
+            # Qui i contatori sono già stati aggiornati durante la sessione
+            corrette_di_sessione = st.session_state.get('corrette_sessione', 0)
+            sbagliate_di_sessione = st.session_state.get('sbagliate_sessione', 0)
             
-            st.write(f"Risposte corrette in questa sessione: **{corrette_di_sessione}** su **{len(quiz_ids_current_session)}** domande.")
-            if len(quiz_ids_current_session) > 0:
-                st.write(f"Percentuale di risposte corrette: **{(corrette_di_sessione / len(quiz_ids_current_session) * 100):.1f}%**")
+            st.write(f"Risposte corrette in questa sessione: **{corrette_di_sessione}** su **{corrette_di_sessione + sbagliate_di_sessione}** domande.")
+            if (corrette_di_sessione + sbagliate_di_sessione) > 0:
+                st.write(f"Percentuale di risposte corrette: **{(corrette_di_sessione / (corrette_di_sessione + sbagliate_di_sessione) * 100):.1f}%**")
             
-            utenti = carica_utenti() 
-            username = st.session_state.username
+            # Salva la sessione nello storico al completamento
+            utenti[username]['storico_sessioni_esercizi'].append({
+                'data': datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                'corrette': corrette_di_sessione,
+                'sbagliate': sbagliate_di_sessione,
+                'azione': 'Completamento Sessione'
+            })
+            # Mantieni solo le ultime 10 sessioni nello storico
+            utenti[username]['storico_sessioni_esercizi'] = utenti[username]['storico_sessioni_esercizi'][-10:]
+
             current_errate_ids_global = set(utenti[username].get('domande_errate_ids', []))
             if 'domande_errate_ids_session' in st.session_state:
                 current_errate_ids_global.update(st.session_state.domande_errate_ids_session) 
@@ -525,11 +627,13 @@ def esercizi():
             col_ricomincia_1, col_ricomincia_2 = st.columns(2)
             with col_ricomincia_1:
                 if st.button("Ricomincia Esercizi (escludi le conosciute)", key="ricomincia_escludi"):
+                    # Salvataggio contatori già fatto al completamento
                     utenti[username]['ultimo_indice_esercizi'] = 0
                     utenti[username]['sequenza_esercizi_corrente'] = [] 
                     salva_utenti(utenti)
                     for key in ["quiz", "indice", "ordine_risposte",
-                                 "risposta_confermata", "domande_errate_ids_session", "last_mode_loaded"]:
+                                 "risposta_confermata", "domande_errate_ids_session", "last_mode_loaded",
+                                 "corrette_sessione", "sbagliate_sessione"]: # Reset contatori
                         st.session_state.pop(key, None)
                     for key in list(st.session_state.keys()):
                         if key.startswith("scelta_q"):
@@ -538,12 +642,14 @@ def esercizi():
             
             with col_ricomincia_2:
                 if st.button("Ricomincia Esercizi (includi tutte le domande)", key="ricomincia_includi_all"):
+                    # Salvataggio contatori già fatto al completamento
                     utenti[username]['domande_conosciute_ids'] = []
                     utenti[username]['ultimo_indice_esercizi'] = 0
                     utenti[username]['sequenza_esercizi_corrente'] = [] 
                     salva_utenti(utenti)
                     for key in ["quiz", "indice", "ordine_risposte",
-                                 "risposta_confermata", "domande_errate_ids_session", "last_mode_loaded"]:
+                                 "risposta_confermata", "domande_errate_ids_session", "last_mode_loaded",
+                                 "corrette_sessione", "sbagliate_sessione"]: # Reset contatori
                         st.session_state.pop(key, None)
                     for key in list(st.session_state.keys()):
                         if key.startswith("scelta_q"):
@@ -552,10 +658,14 @@ def esercizi():
 
         elif st.session_state.modalita == "Ripasso Domande Sbagliate":
             st.info("Hai ripassato tutte le domande sbagliate disponibili per questa sessione.")
+            # Quando il ripasso è completato, i contatori sono già al loro stato finale
+            # e non serve un salvataggio esplicito qui, dato che l'utente può ripartire.
             col_ripasso_1, col_ripasso_2 = st.columns(2)
             with col_ripasso_1:
                 if st.button("Ricomincia Ripasso", key="ricomincia_ripasso"):
-                    for key in ["quiz", "indice", "ordine_risposte", "risposta_confermata", "last_mode_loaded", "ripassate_sessione"]:
+                    for key in ["quiz", "indice", "ordine_risposte", "risposta_confermata", 
+                                "last_mode_loaded", "ripassate_sessione",
+                                "corrette_sessione", "sbagliate_sessione"]: # Reset contatori
                         st.session_state.pop(key, None)
                     for key in list(st.session_state.keys()):
                         if key.startswith("scelta_q"):
@@ -746,12 +856,23 @@ def simulazione_esame():
 
 # --- Main ---
 def main():
-    login() 
+    login_col, main_col = st.columns([1, 4]) # Sidebar per login e radio, colonna principale per il quiz
+    
+    with login_col:
+        login() 
+
     if st.session_state.get("logged_in", False):
-        if st.session_state.modalita in ["Esercizi", "Ripasso Domande Sbagliate"]:
-            esercizi()
-        else: # "Simulazione Esame"
-            simulazione_esame()
+        # La sidebar di destra per lo storico degli esercizi e simulazioni
+        with st.sidebar:
+            st.markdown("---")
+            visualizza_storico_esercizi() # Nuovo storico
+            st.markdown("---")
+
+        with main_col:
+            if st.session_state.modalita in ["Esercizi", "Ripasso Domande Sbagliate"]:
+                esercizi()
+            else: # "Simulazione Esame"
+                simulazione_esame()
 
 if __name__ == "__main__":
     main()
