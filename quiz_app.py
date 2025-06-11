@@ -8,17 +8,12 @@ UTENTI_FILE = "utenti.json"
 QUIZ_FILE = "quiz.xlsx"
 
 # --- INIZIALIZZAZIONE GLOBALE E ULTRA-PRECOCE DI session_state ---
-# Questo blocco viene eseguito ad ogni re-run e assicura che queste chiavi esistano sempre.
 if 'logged_in' not in st.session_state:
     st.session_state.logged_in = False
 if 'username' not in st.session_state:
     st.session_state.username = ""
 if 'modalita' not in st.session_state:
     st.session_state.modalita = "Esercizi" # Default mode
-# st.session_state.risposte_date ora conterrà le risposte storiche per ID domanda
-# Non la inizializziamo qui con {} perché verrà caricata al login.
-# La inizializzazione avverrà all'interno del login se l'utente è nuovo o se il campo non esiste.
-# --- FINE INIZIALIZZAZIONE GLOBALE ---
 
 # --- Funzioni Utility ---
 def carica_utenti():
@@ -98,8 +93,6 @@ def login():
             st.sidebar.warning(f"Domande non conosciute: **{domande_non_conosciute_count}**")
             
             # Contatori Risposte Corrette e Sbagliate per la sessione corrente di esercizi (CUMULATIVI)
-            # Questi ora contano le risposte storiche dell'utente basate sull'ID
-            # Se st.session_state.risposte_date non è ancora caricato (es. al primo accesso di un utente nuovo), usa un fallback
             risposte_storiche = st.session_state.get('risposte_date', {})
             corrette_cumulative = sum(1 for status in risposte_storiche.values() if status is True)
             sbagliate_cumulative = sum(1 for status in risposte_storiche.values() if status is False)
@@ -121,12 +114,11 @@ def login():
 
         if current_modalita != new_modalita:
             st.session_state.modalita = new_modalita
-            # Salva la nuova modalità immediatamente
-            salva_utenti(carica_utenti()) # Ricarica per non sovrascrivere dati recenti
+            salva_utenti(carica_utenti()) # Salva il cambio modalità
             
             # Reset dello stato specifico della modalità quando si cambia, MA non dei contatori globali
             for key in ["quiz", "indice", "ordine_risposte", "risposta_confermata", 
-                        "domande_errate_ids_session", # Questo sarà il contatore delle errate SOLO della sessione esercizi
+                        "domande_errate_ids_session", 
                         "esame_domande", "esame_indice", "esame_punteggio", 
                         "esame_ordine_risposte", "esame_risposte_dettaglio",
                         "esame_domande_errate_ids", "esame_confermato", "simulazione_gia_salvata",
@@ -134,7 +126,6 @@ def login():
                         "ripassate_sessione"]: 
                 st.session_state.pop(key, None)
             
-            # Resetta solo i widget radio button dinamici (es. scelta_qX, es_scelta_qX)
             for key in list(st.session_state.keys()):
                 if key.startswith("scelta_q") or key.startswith("es_scelta_q"):
                     st.session_state.pop(key)
@@ -267,8 +258,7 @@ def esercizi():
                 utenti[username]['ultimo_indice_esercizi'] = 0
                 utenti[username]['sequenza_esercizi_corrente'] = [] 
                 
-                # Resetta le risposte storiche dell'utente per gli esercizi se si ricomincia da zero
-                st.session_state.risposte_date = {} 
+                st.session_state.risposte_date = {} # Resetta le risposte storiche dell'utente per gli esercizi
                 salva_utenti(utenti) 
 
                 for key in ["quiz", "indice", "ordine_risposte",
@@ -339,6 +329,52 @@ def esercizi():
                           disabled=st.session_state.risposta_confermata)
         st.session_state[f"scelta_q{i}"] = scelta
 
+        # --- Pulsanti di Navigazione QUIZ ---
+        col_nav_1, col_nav_2, col_nav_3 = st.columns([1, 1, 2]) # Colonna extra per "Ricomincia"
+
+        with col_nav_1:
+            if st.button("⬅️ Indietro", key=f"prev_btn_{i}", disabled=(st.session_state.indice == 0)):
+                st.session_state.indice -= 1
+                if st.session_state.modalita == "Esercizi": # Salva l'indice solo in modalità esercizi
+                    utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
+                    salva_utenti(utenti)
+                st.session_state.risposta_confermata = False
+                st.session_state.pop(f"scelta_q{i}", None) # Rimuovi la scelta per ricaricare il radio
+                st.rerun()
+
+        with col_nav_2:
+            if st.button("Avanti ➡️", key=f"next_btn_{i}", disabled=(st.session_state.indice >= len(quiz) - 1 and not st.session_state.risposta_confermata)):
+                if not st.session_state.risposta_confermata:
+                    st.warning("Per avanzare, devi prima confermare la tua risposta.")
+                else:
+                    st.session_state.indice += 1
+                    if st.session_state.modalita == "Esercizi": # Salva l'indice solo in modalità esercizi
+                        utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
+                        salva_utenti(utenti)
+                    st.session_state.risposta_confermata = False
+                    st.session_state.pop(f"scelta_q{i}", None)
+                    st.rerun()
+
+        with col_nav_3:
+            if st.button("↩️ Ricomincia da Capo", key=f"reset_btn_{i}"):
+                # La logica di "Ricomincia da Capo" è ora centralizzata
+                # Forziamo il ricaricamento del quiz e reset dello stato
+                if st.session_state.modalita == "Esercizi":
+                    utenti[username]['ultimo_indice_esercizi'] = 0
+                    utenti[username]['sequenza_esercizi_corrente'] = [] 
+                    salva_utenti(utenti)
+                
+                # Resetta le chiavi di session_state relative al quiz corrente
+                for key in ["quiz", "indice", "ordine_risposte", "risposta_confermata", "last_mode_loaded"]:
+                    st.session_state.pop(key, None)
+                # Resetta i widget radio
+                for key in list(st.session_state.keys()):
+                    if key.startswith("scelta_q"):
+                        st.session_state.pop(key)
+                st.rerun()
+
+
+        # --- Feedback e Azioni Principali (Sotto i pulsanti di navigazione) ---
         col1, col2, col3 = st.columns(3) 
 
         with col1:
@@ -356,9 +392,8 @@ def esercizi():
                     risposta_esatta = (scelta == corretta_text)
                     
                     if st.session_state.modalita == "Esercizi": 
-                        # Aggiorna lo storico delle risposte usando l'ID della domanda
                         st.session_state.risposte_date[q['ID']] = risposta_esatta 
-                        salva_utenti(utenti) # Salva subito dopo aver aggiornato la risposta
+                        salva_utenti(utenti) 
 
                     if risposta_esatta:
                         st.success("✅ Risposta corretta!")
@@ -383,7 +418,7 @@ def esercizi():
                 chiave_risposta_corretta = f"Risposta {corretta_lettera}"
                 corretta_text = str(q[chiave_risposta_corretta]).strip() 
 
-                if st.session_state.modalita == "Esercizi" and q['ID'] in st.session_state.risposte_date: # Usa ID qui
+                if st.session_state.modalita == "Esercizi" and q['ID'] in st.session_state.risposte_date:
                     if st.session_state.risposte_date[q['ID']]:
                         st.success("✅ Risposta corretta!")
                     else:
@@ -396,16 +431,10 @@ def esercizi():
                         st.error(f"❌ Sbagliata. La risposta corretta era: **{corretta_text}**")
 
 
-                if st.button("Prossima domanda", key=f"prossima_btn_{i}"):
-                    st.session_state.indice += 1
-                    if st.session_state.modalita == "Esercizi":
-                        utenti[username]['ultimo_indice_esercizi'] = st.session_state.indice
-                        salva_utenti(utenti)
-                    
-                    st.session_state.risposta_confermata = False
-                    st.session_state.pop(f"scelta_q{i}", None)
-                    st.rerun()
-        
+                # Il pulsante "Prossima domanda" ora è stato sostituito/integrato da "Avanti"
+                # in caso di conferma, l'utente può semplicemente cliccare "Avanti"
+                # Non c'è più bisogno di un pulsante "Prossima domanda" qui.
+
         with col2:
             if st.session_state.modalita == "Esercizi":
                 if q.get('ID') and q['ID'] not in set(utenti[username]['domande_conosciute_ids']):
@@ -420,7 +449,6 @@ def esercizi():
                         if q['ID'] in utenti[username]['domande_errate_esame_ids']:
                             utenti[username]['domande_errate_esame_ids'].remove(q['ID'])
 
-                        # Aggiungi a risposte_date come True (conosciuta)
                         st.session_state.risposte_date[q['ID']] = True 
 
                         st.session_state.indice += 1 
@@ -443,7 +471,6 @@ def esercizi():
                     if q.get('ID') in utenti[username]['domande_errate_esame_ids']:
                         utenti[username]['domande_errate_esame_ids'].remove(q['ID'])
                     
-                    # Aggiorna anche nello storico delle risposte, segnandola come corretta
                     st.session_state.risposte_date[q['ID']] = True 
                     salva_utenti(utenti)
                     st.success("Domanda rimossa dal set delle 'sbagliate'!")
@@ -462,22 +489,15 @@ def esercizi():
         st.write(f"🎉 Hai completato tutte le domande disponibili in questa modalità!")
         
         if st.session_state.modalita == "Esercizi":
-            # Questi contatori ora rifletteranno solo le risposte della sessione corrente, non quelle storiche
-            corrette_sessione_corrente = sum(1 for status in st.session_state.get('domande_errate_ids_session', []) if status is False) # Conta le sbagliate della sessione
-            # Questo è più complesso da calcolare in base a risposte_date che è storica
-            # Per avere le corrette/sbagliate SOLO di questa sessione:
-            
-            # Recupera solo gli ID delle domande che erano nel quiz di questa sessione
             quiz_ids_current_session = {q['ID'] for q in quiz}
             
-            # Conta le corrette e sbagliate *solo* di questa sessione, usando lo storico
             corrette_di_sessione = 0
             sbagliate_di_sessione = 0
             for q_id in quiz_ids_current_session:
                 if q_id in st.session_state.risposte_date:
                     if st.session_state.risposte_date[q_id] == True:
                         corrette_di_sessione += 1
-                    else: # Se è False o non True
+                    else:
                         sbagliate_di_sessione += 1
             
             st.write(f"Risposte corrette in questa sessione: **{corrette_di_sessione}** su **{len(quiz_ids_current_session)}** domande.")
@@ -505,7 +525,6 @@ def esercizi():
                     for key in ["quiz", "indice", "ordine_risposte",
                                  "risposta_confermata", "domande_errate_ids_session", "last_mode_loaded"]:
                         st.session_state.pop(key, None)
-                    # Non resetta risposte_date qui, è storico!
                     for key in list(st.session_state.keys()):
                         if key.startswith("scelta_q"):
                             st.session_state.pop(key)
@@ -520,7 +539,6 @@ def esercizi():
                     for key in ["quiz", "indice", "ordine_risposte",
                                  "risposta_confermata", "domande_errate_ids_session", "last_mode_loaded"]:
                         st.session_state.pop(key, None)
-                    # Non resetta risposte_date qui, è storico!
                     for key in list(st.session_state.keys()):
                         if key.startswith("scelta_q"):
                             st.session_state.pop(key)
@@ -528,17 +546,20 @@ def esercizi():
 
         elif st.session_state.modalita == "Ripasso Domande Sbagliate":
             st.info("Hai ripassato tutte le domande sbagliate disponibili per questa sessione.")
-            if st.button("Ricomincia Ripasso", key="ricomincia_ripasso"):
-                for key in ["quiz", "indice", "ordine_risposte", "risposta_confermata", "last_mode_loaded", "ripassate_sessione"]:
-                    st.session_state.pop(key, None)
-                for key in list(st.session_state.keys()):
-                    if key.startswith("scelta_q"):
-                        st.session_state.pop(key)
-                st.rerun()
-            if st.button("Torna alla Modalità Esercizi", key="back_to_normal_exercises"):
-                st.session_state.modalita = "Esercizi"
-                salva_utenti(carica_utenti()) # Salva il cambio modalità
-                st.rerun()
+            col_ripasso_1, col_ripasso_2 = st.columns(2)
+            with col_ripasso_1:
+                if st.button("Ricomincia Ripasso", key="ricomincia_ripasso"):
+                    for key in ["quiz", "indice", "ordine_risposte", "risposta_confermata", "last_mode_loaded", "ripassate_sessione"]:
+                        st.session_state.pop(key, None)
+                    for key in list(st.session_state.keys()):
+                        if key.startswith("scelta_q"):
+                            st.session_state.pop(key)
+                    st.rerun()
+            with col_ripasso_2:
+                if st.button("Torna alla Modalità Esercizi", key="back_to_normal_exercises"):
+                    st.session_state.modalita = "Esercizi"
+                    salva_utenti(carica_utenti()) # Salva il cambio modalità
+                    st.rerun()
 
 
 # --- Modalità Simulazione Esame ---
